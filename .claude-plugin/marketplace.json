@@ -1,0 +1,16 @@
+{
+  "name": "high-command",
+  "owner": { "name": "dot-agi" },
+  "metadata": {
+    "description": "High Command, a Claude Code mod: an in-session inbox for agent teams and cross-session messages."
+  },
+  "plugins": [
+    {
+      "name": "high-command",
+      "source": "./",
+      "description": "An in-session inbox for agent teams and cross-session messages: unread counts by peer, threads, delivery results, and /highcommand.",
+      "category": "productivity",
+      "tags": ["mod", "agent-teams", "messaging"]
+    }
+  ]
+}

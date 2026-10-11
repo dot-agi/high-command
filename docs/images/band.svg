@@ -1,0 +1,110 @@
+<svg xml:space="preserve" class="rich-terminal" viewBox="0 0 1360 342.79999999999995" xmlns="http://www.w3.org/2000/svg">
+    <!-- Generated with Rich https://www.textualize.io -->
+    <style>
+
+    @font-face {
+        font-family: "Fira Code";
+        src: local("FiraCode-Regular"),
+                url("https://cdnjs.cloudflare.com/ajax/libs/firacode/6.2.0/woff2/FiraCode-Regular.woff2") format("woff2"),
+                url("https://cdnjs.cloudflare.com/ajax/libs/firacode/6.2.0/woff/FiraCode-Regular.woff") format("woff");
+        font-style: normal;
+        font-weight: 400;
+    }
+    @font-face {
+        font-family: "Fira Code";
+        src: local("FiraCode-Bold"),
+                url("https://cdnjs.cloudflare.com/ajax/libs/firacode/6.2.0/woff2/FiraCode-Bold.woff2") format("woff2"),
+                url("https://cdnjs.cloudflare.com/ajax/libs/firacode/6.2.0/woff/FiraCode-Bold.woff") format("woff");
+        font-style: bold;
+        font-weight: 700;
+    }
+
+    .terminal-2347910031-matrix {
+        font-family: Fira Code, monospace;
+        font-size: 20px;
+        line-height: 24.4px;
+        font-variant-east-asian: full-width;
+    }
+
+    .terminal-2347910031-title {
+        font-size: 18px;
+        font-weight: bold;
+        font-family: arial;
+    }
+
+    .terminal-2347910031-style1 { fill: #87d787 }
+.terminal-2347910031-style2 { fill: #d9d9d9 }
+.terminal-2347910031-style3 { fill: #d7af00;font-weight: bold }
+.terminal-2347910031-style4 { fill: #ffffff }
+.terminal-2347910031-style5 { fill: #afd7ff }
+.terminal-2347910031-style6 { fill: #d9d9d9;font-weight: bold }
+.terminal-2347910031-style7 { fill: #949494 }
+.terminal-2347910031-style8 { fill: #808080 }
+.terminal-2347910031-style9 { fill: #ffd700 }
+    </style>
+
+    <defs>
+    <clipPath id="terminal-2347910031-clip-terminal">
+      <rect x="0" y="0" width="1341.0" height="291.79999999999995" />
+    </clipPath>
+    <clipPath id="terminal-2347910031-line-0">
+    <rect x="0" y="1.5" width="1342" height="24.65"/>
+            </clipPath>
+<clipPath id="terminal-2347910031-line-1">
+    <rect x="0" y="25.9" width="1342" height="24.65"/>
+            </clipPath>
+<clipPath id="terminal-2347910031-line-2">
+    <rect x="0" y="50.3" width="1342" height="24.65"/>
+            </clipPath>
+<clipPath id="terminal-2347910031-line-3">
+    <rect x="0" y="74.7" width="1342" height="24.65"/>
+            </clipPath>
+<clipPath id="terminal-2347910031-line-4">
+    <rect x="0" y="99.1" width="1342" height="24.65"/>
+            </clipPath>
+<clipPath id="terminal-2347910031-line-5">
+    <rect x="0" y="123.5" width="1342" height="24.65"/>
+            </clipPath>
+<clipPath id="terminal-2347910031-line-6">
+    <rect x="0" y="147.9" width="1342" height="24.65"/>
+            </clipPath>
+<clipPath id="terminal-2347910031-line-7">
+    <rect x="0" y="172.3" width="1342" height="24.65"/>
+            </clipPath>
+<clipPath id="terminal-2347910031-line-8">
+    <rect x="0" y="196.7" width="1342" height="24.65"/>
+            </clipPath>
+<clipPath id="terminal-2347910031-line-9">
+    <rect x="0" y="221.1" width="1342" height="24.65"/>
+            </clipPath>
+<clipPath id="terminal-2347910031-line-10">
+    <rect x="0" y="245.5" width="1342" height="24.65"/>
+            </clipPath>
+    </defs>
+
+    <rect fill="#0c0c0c" stroke="rgba(255,255,255,0.35)" stroke-width="1" x="1" y="1" width="1358" height="340.8" rx="8"/><text class="terminal-2347910031-title" fill="#d9d9d9" text-anchor="middle" x="679" y="27">High&#160;Command&#160;·&#160;band&#160;and&#160;status&#160;line</text>
+            <g transform="translate(26,22)">
+            <circle cx="0" cy="0" r="7" fill="#ff5f57"/>
+            <circle cx="22" cy="0" r="7" fill="#febc2e"/>
+            <circle cx="44" cy="0" r="7" fill="#28c840"/>
+            </g>
+        
+    <g transform="translate(9, 41)" clip-path="url(#terminal-2347910031-clip-terminal)">
+    
+    <g class="terminal-2347910031-matrix">
+    <text class="terminal-2347910031-style1" x="0" y="20" textLength="12.2" clip-path="url(#terminal-2347910031-line-0)">⏺</text><text class="terminal-2347910031-style2" x="12.2" y="20" textLength="122" clip-path="url(#terminal-2347910031-line-0)">&#160;Teammate&#160;</text><text class="terminal-2347910031-style3" x="134.2" y="20" textLength="73.2" clip-path="url(#terminal-2347910031-line-0)">@scout</text><text class="terminal-2347910031-style2" x="207.4" y="20" textLength="109.8" clip-path="url(#terminal-2347910031-line-0)">&#160;finished</text><text class="terminal-2347910031-style2" x="1342" y="20" textLength="12.2" clip-path="url(#terminal-2347910031-line-0)">
+</text><text class="terminal-2347910031-style2" x="0" y="44.4" textLength="1329.8" clip-path="url(#terminal-2347910031-line-1)">&#160;&#160;Sent&#160;&quot;scout&#160;ready&quot;&#160;to&#160;team-lead.&#160;The&#160;message&#160;was&#160;delivered&#160;(msg_id&#160;93fa14ac-966d-4090-bf62-50970b90acb4).&#160;I</text><text class="terminal-2347910031-style2" x="1342" y="44.4" textLength="12.2" clip-path="url(#terminal-2347910031-line-1)">
+</text><text class="terminal-2347910031-style2" x="0" y="68.8" textLength="646.6" clip-path="url(#terminal-2347910031-line-2)">&#160;&#160;did&#160;not&#160;run&#160;any&#160;shell&#160;commands&#160;or&#160;read&#160;other&#160;files.</text><text class="terminal-2347910031-style2" x="1342" y="68.8" textLength="12.2" clip-path="url(#terminal-2347910031-line-2)">
+</text><text class="terminal-2347910031-style2" x="1342" y="93.2" textLength="12.2" clip-path="url(#terminal-2347910031-line-3)">
+</text><text class="terminal-2347910031-style4" x="0" y="117.6" textLength="12.2" clip-path="url(#terminal-2347910031-line-4)">⏺</text><text class="terminal-2347910031-style2" x="12.2" y="117.6" textLength="61" clip-path="url(#terminal-2347910031-line-4)">&#160;The&#160;</text><text class="terminal-2347910031-style5" x="73.2" y="117.6" textLength="61" clip-path="url(#terminal-2347910031-line-4)">scout</text><text class="terminal-2347910031-style2" x="134.2" y="117.6" textLength="1110.2" clip-path="url(#terminal-2347910031-line-4)">&#160;teammate&#160;sent&#160;its&#160;idle&#160;notification.&#160;It&#160;confirms&#160;&quot;scout&#160;ready&quot;&#160;was&#160;delivered.&#160;It&#160;asked&#160;for</text><text class="terminal-2347910031-style2" x="1342" y="117.6" textLength="12.2" clip-path="url(#terminal-2347910031-line-4)">
+</text><text class="terminal-2347910031-style2" x="0" y="142" textLength="597.8" clip-path="url(#terminal-2347910031-line-5)">&#160;&#160;nothing,&#160;so&#160;I&#160;took&#160;no&#160;action&#160;and&#160;did&#160;not&#160;reply.</text><text class="terminal-2347910031-style2" x="1342" y="142" textLength="12.2" clip-path="url(#terminal-2347910031-line-5)">
+</text><text class="terminal-2347910031-style2" x="0" y="166.4" textLength="817.4" clip-path="url(#terminal-2347910031-line-6)">High&#160;Command&#160;·&#160;5&#160;unread&#160;(retained)&#160;—&#160;scout&#160;2&#160;·&#160;tester&#160;1&#160;·&#160;helper&#160;2&#160;</text><text class="terminal-2347910031-style6" x="817.4" y="166.4" textLength="97.6" clip-path="url(#terminal-2347910031-line-6)">[&#160;Open&#160;]</text><text class="terminal-2347910031-style6" x="927.2" y="166.4" textLength="146.4" clip-path="url(#terminal-2347910031-line-6)">[&#160;Read&#160;all&#160;]</text><text class="terminal-2347910031-style6" x="1085.8" y="166.4" textLength="97.6" clip-path="url(#terminal-2347910031-line-6)">[&#160;Hide&#160;]</text><text class="terminal-2347910031-style7" x="1293.2" y="166.4" textLength="36.6" clip-path="url(#terminal-2347910031-line-6)">[-]</text><text class="terminal-2347910031-style2" x="1342" y="166.4" textLength="12.2" clip-path="url(#terminal-2347910031-line-6)">
+</text><text class="terminal-2347910031-style7" x="1171.2" y="190.8" textLength="146.4" clip-path="url(#terminal-2347910031-line-7)">53374&#160;tokens</text><text class="terminal-2347910031-style2" x="1342" y="190.8" textLength="12.2" clip-path="url(#terminal-2347910031-line-7)">
+</text><text class="terminal-2347910031-style8" x="0" y="215.2" textLength="1342" clip-path="url(#terminal-2347910031-line-8)">──────────────────────────────────────────────────────────────────────────────────────────────────────────────</text><text class="terminal-2347910031-style2" x="1342" y="215.2" textLength="12.2" clip-path="url(#terminal-2347910031-line-8)">
+</text><text class="terminal-2347910031-style2" x="0" y="239.6" textLength="24.4" clip-path="url(#terminal-2347910031-line-9)">❯ </text><text class="terminal-2347910031-style2" x="1342" y="239.6" textLength="12.2" clip-path="url(#terminal-2347910031-line-9)">
+</text><text class="terminal-2347910031-style8" x="0" y="264" textLength="1342" clip-path="url(#terminal-2347910031-line-10)">──────────────────────────────────────────────────────────────────────────────────────────────────────────────</text><text class="terminal-2347910031-style2" x="1342" y="264" textLength="12.2" clip-path="url(#terminal-2347910031-line-10)">
+</text><text class="terminal-2347910031-style9" x="24.4" y="288.4" textLength="427" clip-path="url(#terminal-2347910031-line-11)">⚠&#160;high-command:&#160;5&#160;unread&#160;(retained)</text><text class="terminal-2347910031-style2" x="1342" y="288.4" textLength="12.2" clip-path="url(#terminal-2347910031-line-11)">
+</text>
+    </g>
+    </g>
+</svg>
