@@ -86,6 +86,36 @@ For one session from a clone:
 claude --plugin-dir ./high-command
 ```
 
+### Agents and scripts
+
+Install from a shell with Claude Code 2.1.292 or later. The second part turns on auto-update. It runs only when the install succeeds and the marketplace entry exists:
+
+```sh
+claude plugin install high-command --marketplace dot-agi/high-command --scope user --json \
+  && f="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json" \
+  && jq -e --arg name high-command '.extraKnownMarketplaces[$name].source' "$f" > /dev/null \
+  && tmp=$(mktemp "$f.XXXXXX") \
+  && { jq --arg name high-command '.extraKnownMarketplaces[$name].autoUpdate = true' "$f" > "$tmp" && mv "$tmp" "$f" || { rm -f "$tmp"; false; }; }
+```
+
+Claude Code 2.1.288 to 2.1.291 has no `--marketplace` option. Add the marketplace first, then run the auto-update part above, from `f=` on:
+
+```sh
+claude plugin marketplace add dot-agi/high-command --scope user --json \
+  && claude plugin install high-command@high-command --scope user --json
+```
+
+Auto-update runs only in interactive sessions. A headless job updates at its start, before the session that uses the mod:
+
+```sh
+claude plugin update high-command@high-command --json
+```
+
+- New code loads in the next session, or after `/reload-plugins`.
+- Running `install` again does not update. Use `update`.
+- On a host with no SSH key for GitHub, set `CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1` in the environment of every `claude` command and session.
+- The auto-update part replaces `settings.json` with a new file with mode 600. If `settings.json` is a symbolic link, edit its target instead.
+
 ## Commands
 
 | Command | What it does |
