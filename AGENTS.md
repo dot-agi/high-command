@@ -1,5 +1,46 @@
 # Agent instructions for High Command
 
+## Install and update
+
+Install from a shell with Claude Code 2.1.292 or later. The second part turns on auto-update. It runs only when the install succeeds and the marketplace entry exists:
+
+```sh
+claude plugin install high-command --marketplace dot-agi/high-command --scope user --json \
+  && f="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json" \
+  && jq -e --arg name high-command '.extraKnownMarketplaces[$name].source' "$f" > /dev/null \
+  && tmp=$(mktemp "$f.XXXXXX") \
+  && { jq --arg name high-command '.extraKnownMarketplaces[$name].autoUpdate = true' "$f" > "$tmp" && mv "$tmp" "$f" || { rm -f "$tmp"; false; }; }
+```
+
+Claude Code 2.1.288 to 2.1.291 has no `--marketplace` option. Add the marketplace first, then turn on auto-update:
+
+```sh
+claude plugin marketplace add dot-agi/high-command --scope user --json \
+  && claude plugin install high-command@high-command --scope user --json \
+  && f="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json" \
+  && jq -e --arg name high-command '.extraKnownMarketplaces[$name].source' "$f" > /dev/null \
+  && tmp=$(mktemp "$f.XXXXXX") \
+  && { jq --arg name high-command '.extraKnownMarketplaces[$name].autoUpdate = true' "$f" > "$tmp" && mv "$tmp" "$f" || { rm -f "$tmp"; false; }; }
+```
+
+Auto-update runs only in interactive sessions. A headless job updates at its start, before the session that uses the mod:
+
+```sh
+claude plugin update high-command@high-command --json
+```
+
+Check the result. The first command prints the installed version. The second prints the latest release:
+
+```sh
+claude plugin list --json | jq -r '.[] | select(.id == "high-command@high-command") | "\(.version) enabled=\(.enabled)"' \
+  && git ls-remote --tags --refs https://github.com/dot-agi/high-command 'high-command--v*' | sed 's/.*--v//' | sort -V | tail -n 1
+```
+
+- On a host with no SSH key for GitHub, set `CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1` in the environment of every `claude` command and session.
+- New code loads in the next session, or after `/reload-plugins`. An agent cannot type `/reload-plugins`, so it starts a new session.
+- Running `install` again does not update. Use `update`.
+- The `mv` replaces the settings file, with mode 600. If `settings.json` is a symbolic link, edit its target instead.
+
 ## Layout
 
 | Path | Role |
