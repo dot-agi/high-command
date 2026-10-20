@@ -4,7 +4,7 @@
   <img src="https://img.shields.io/badge/Claude_Code-2.1.288%2B-D97757" alt="Claude Code 2.1.288+">
   <img src="https://img.shields.io/badge/type-mod-555555" alt="mod">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-555555" alt="License: MIT"></a>
-  <img src="https://img.shields.io/badge/version-1.1.1-555555" alt="Version: 1.1.1">
+  <img src="https://img.shields.io/badge/version-1.1.2-555555" alt="Version: 1.1.2">
 </p>
 
 <p align="center"><strong>One inbox for agent-team teammates, named subagents, and other Claude Code sessions.</strong></p>
@@ -128,6 +128,8 @@ claude plugin update high-command@high-command --json
 | Key | Where | Action |
 | --- | --- | --- |
 | Ctrl+X, then Tab | Anywhere | Move the keyboard to the band or the pane. This is Claude Code's own focus chord. |
+| Tab | Band or pane | Move to the next button |
+| Enter | Band or pane | Press the button that has focus |
 | `o` | Band | Open the pane |
 | `r` | Band or pane roster | Mark every message read |
 | `h` | Band | Hide the band until a newer message arrives |
@@ -135,6 +137,8 @@ claude plugin update high-command@high-command --json
 | `b` | Pane thread | Back to the roster |
 | `r` | Pane thread | Mark that peer read, only while **Mark read** shows |
 | Esc | Band or pane | Give the keyboard back to the prompt |
+
+When the band's row has room, it ends with the dim hint `ctrl+x tab to choose`. Press Ctrl+X, then Tab, to give the band the keyboard. Then Tab moves between its buttons, Enter presses one, and Esc gives the keyboard back to the prompt.
 
 Release Ctrl before you press Tab, because many terminals read Ctrl+Tab as next tab. In Emacs terminals, Ctrl+X goes to Emacs: click the band, run `/highcommand open`, or rebind `abovePrompt:focus` with [`/keybindings`](https://code.claude.com/docs/en/keybindings#above-prompt-actions).
 
