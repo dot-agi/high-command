@@ -141,6 +141,31 @@ export function unreadText(main: number, lanes = 0): string {
     .filter(part => part !== undefined).join(' · ')
 }
 
+/** The dim hint at the end of the band's row: the keys that give the band the keyboard. */
+export const BAND_KEY_HINT = 'ctrl+x tab to choose'
+
+/**
+ * Code points a terminal can draw two cells wide, in broad ranges: Hangul, CJK, full-width forms, the emoji of the
+ * symbol blocks, and every code point past U+FFFF.
+ */
+const WIDE: readonly (readonly [number, number])[] = [
+  [0x1100, 0x115f], [0x231a, 0x2b55], [0x2e80, 0xa4cf], [0xa960, 0xa97f], [0xac00, 0xd7a3],
+  [0xf900, 0xfaff], [0xfe10, 0xfe6f], [0xff00, 0xff60], [0xffe0, 0xffe6], [0x10000, 0x10ffff],
+]
+
+/**
+ * The terminal cells one line of text takes, counted high: a code point in WIDE counts two, any other one, so a
+ * row that fits by this count fits on the screen.
+ */
+export function cellWidth(text: string): number {
+  let cells = 0
+  for (const char of text) {
+    const code = char.codePointAt(0)!
+    cells += WIDE.some(([first, last]) => code >= first && code <= last) ? 2 : 1
+  }
+  return cells
+}
+
 /**
  * A full peer identity: one line without control or format characters
  * (bidi controls, zero-width marks). Bracketed text belongs to the name.

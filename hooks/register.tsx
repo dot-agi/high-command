@@ -552,10 +552,22 @@ export const register: Register = (on, options) => {
     const waiting = rows.filter(row => row.unread > 0)
     const laneUnread = withLanes ? lanesUnread(all) : 0
     if (waiting.length === 0 && laneUnread === 0) return below
-    // Other mods draw `below`; when the band would push it past the engine's bounds, it yields.
-    const band = bandTree($.ui.resolve(e), waiting, bandActions($, withLanes), below, peerLabels(rows.map(row => row.peer)), laneUnread)
-    if (fitsBounds(band)) return band
-    const compact = compactBandTree($.ui.resolve(e), waiting, bandActions($, withLanes), below, laneUnread)
-    return fitsBounds(compact) ? compact : below
+    // Other mods draw `below`; when the band would push it past the engine's bounds, it drops the key hint, then
+    // keeps only the counts and Open, then yields.
+    const ui = $.ui.resolve(e)
+    const actions = bandActions($, withLanes)
+    const labels = peerLabels(rows.map(row => row.peer))
+    const columns = e.props.bodyColumns
+    const bands = [
+      () => bandTree(ui, waiting, actions, below, labels, laneUnread, columns),
+      () => bandTree(ui, waiting, actions, below, labels, laneUnread),
+      () => compactBandTree(ui, waiting, actions, below, laneUnread, columns),
+      () => compactBandTree(ui, waiting, actions, below, laneUnread),
+    ]
+    for (const draw of bands) {
+      const band = draw()
+      if (fitsBounds(band)) return band
+    }
+    return below
   })
 }

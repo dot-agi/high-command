@@ -3,7 +3,7 @@ import type { BoxProps, ButtonProps, ElementConstructor, RenderElement, TextProp
 import type { HighCommandEntry, HighCommandAgent, HighCommandCapture } from '../types'
 import { isNewer, labelOf, unreadTotal, type RosterRow, type Thread } from './inbox'
 import { LIMITS } from './limits'
-import { captureLabel, identityPart, clockLabel, count, peerLabel, peerLabels, stateLabel, trustLabel, unreadText } from './text'
+import { BAND_KEY_HINT, captureLabel, cellWidth, identityPart, clockLabel, count, peerLabel, peerLabels, stateLabel, trustLabel, unreadText } from './text'
 
 /** The elements High Command draws with; every surface's table has them. */
 type HighCommandElements = {
@@ -217,9 +217,23 @@ export function paneTree(ui: HighCommandElements, model: PaneModel, actions: Pan
   </Box>
 }
 
+/** The terminal cells of a row of one text and Buttons drawn as `[ label ]`, with `gap` cells before each Button. */
+function rowCells(text: string, labels: readonly string[], gap: number): number {
+  return labels.reduce((cells, label) => cells + gap + cellWidth(label) + 4, cellWidth(text))
+}
+
+/**
+ * The dim key hint after the last Button of a row of `cells` cells, or false. It shows only when the row, a gap of
+ * one and the hint all fit the band's `columns`, so the row never wraps and keeps every Button; never without `columns`.
+ */
+function keyHint(Text: HighCommandElements['Text'], cells: number, columns: number | undefined): RenderElement | false {
+  return columns !== undefined && cells + 1 + cellWidth(BAND_KEY_HINT) <= columns && <Text dimColor wrap="truncate-end">{BAND_KEY_HINT}</Text>
+}
+
 /**
  * The band row above what other mods draw there. `waiting` holds only rows with unread entries; `laneUnread` is the
- * unread count of all agent lanes, above zero only with agentLanesInBand on.
+ * unread count of all agent lanes, above zero only with agentLanesInBand on. `columns`, the band's width in cells,
+ * adds the key hint where the row has room for it.
  */
 export function bandTree(
   { Box, Text, Button }: HighCommandElements,
@@ -228,29 +242,35 @@ export function bandTree(
   below: RenderElement,
   labels: Map<string, string>,
   laneUnread = 0,
+  columns?: number,
 ): RenderElement {
   const named = waiting.slice(0, LIMITS.bandPeers).map(row => `${labels.get(row.peer)} ${row.unread}`)
   const more = waiting.length > LIMITS.bandPeers ? [`+${waiting.length - LIMITS.bandPeers} more`] : []
   const peers = [...named, ...more]
+  const summary = `High Command · ${unreadText(unreadTotal(waiting), laneUnread)}${peers.length === 0 ? '' : ` — ${peers.join(' · ')}`}`
   return (
     <Box flexDirection="column">
       <Box flexDirection="row" columnGap={1}>
-        <Text wrap="truncate-end">{`High Command · ${unreadText(unreadTotal(waiting), laneUnread)}${peers.length === 0 ? '' : ` — ${peers.join(' · ')}`}`}</Text>
+        <Text wrap="truncate-end">{summary}</Text>
         <Button key="band:open" label="Open" hotkey="o" onPress={actions.open} />
         <Button key="band:read-all" label="Read all" hotkey="r" onPress={actions.readAll} />
         <Button key="band:hide" label="Hide" hotkey="h" onPress={actions.hide} />
+        {keyHint(Text, rowCells(summary, ['Open', 'Read all', 'Hide'], 1), columns)}
       </Box>
       {below}
     </Box>
   )
 }
 
-/** Keeps only the counts and Open when the full band exceeds the shared budget. */
-export function compactBandTree({ Box, Text, Button }: HighCommandElements, waiting: readonly RosterRow[], actions: BandActions, below: RenderElement, laneUnread = 0): RenderElement {
+/** Keeps only the counts and Open when the full band exceeds the shared budget; `columns` as in bandTree. */
+export function compactBandTree({ Box, Text, Button }: HighCommandElements, waiting: readonly RosterRow[], actions: BandActions, below: RenderElement, laneUnread = 0, columns?: number): RenderElement {
+  const summary = `High Command · ${unreadText(unreadTotal(waiting), laneUnread)}`
+  const hint = keyHint(Text, rowCells(summary, ['Open'], 0), columns)
   return <Box flexDirection="column">
     <Box flexDirection="row">
-      <Text>{`High Command · ${unreadText(unreadTotal(waiting), laneUnread)}`}</Text>
+      <Text>{summary}</Text>
       <Button key="band:open" label="Open" hotkey="o" onPress={actions.open} />
+      {hint && <Box marginLeft={1}>{hint}</Box>}
     </Box>
     {below}
   </Box>
