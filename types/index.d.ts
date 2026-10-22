@@ -103,6 +103,8 @@ declare module 'claude-code' {
       lanes: Record<string, HighCommandLane>
       selectedLane: string | null
       lanePage: number
+      /** Whether the pane's Agent status block is open. */
+      agentStatus: boolean
       rosterPage: number
       agents: Record<string, HighCommandAgent>
       capture: HighCommandCapture | null

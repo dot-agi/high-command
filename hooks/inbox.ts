@@ -30,7 +30,8 @@ export type RosterRow = {
 }
 
 /** The open thread as the pane draws it: the newest entries first, the count of older ones, and the count of new ones. */
-export type Thread = { row: RosterRow; since: number; shown: HighCommandEntry[]; hidden: number; fresh: number; page: number; pages: number; identityPage?: number; reasonSeq?: number }
+/** `moved`: the entries that moved to the next page because this one ended at its budget, up to LIMITS.threadEntries. */
+export type Thread = { row: RosterRow; since: number; shown: HighCommandEntry[]; hidden: number; fresh: number; page: number; pages: number; moved: number; identityPage?: number; reasonSeq?: number }
 
 /** The seq of the newest entry, or 0 for an empty list. The window never drops its newest entry. */
 export function newestSeq(list: readonly HighCommandEntry[]): number {
@@ -320,7 +321,8 @@ export function threadOf(entries: readonly HighCommandEntry[], rows: readonly Ro
   const groups: HighCommandEntry[][] = [[]]
   let size = 0
   for (const entry of all) {
-    const cost = JSON.stringify([entry.body, entry.summary]).length + 2000
+    // Each text the entry can draw, Send details open, serialized; 2,000 more for its lines, Buttons, and structure.
+    const cost = JSON.stringify([entry.body, entry.summary, entry.delivery?.isDelivered === false ? entry.delivery.reason : '', entry.refusal?.body, entry.core?.to, entry.core?.body, entry.core?.reason]).length + 2000
     if (groups.at(-1)!.length >= LIMITS.threadEntries || size + cost > 60_000) {
       groups.push([])
       size = 0
@@ -332,7 +334,9 @@ export function threadOf(entries: readonly HighCommandEntry[], rows: readonly Ro
   const page = Math.max(0, Math.min(open.page ?? 0, pages - 1))
   const shown = groups[page]!
   const fresh = all.filter(entry => isNewer(entry, open.since)).length
-  return { row, since: open.since, shown, hidden: all.length - shown.length, fresh, page, pages, identityPage: open.identityPage, reasonSeq: open.reasonSeq }
+  const later = groups.slice(page + 1).reduce((sum, group) => sum + group.length, 0)
+  const moved = later > 0 ? Math.min(LIMITS.threadEntries - shown.length, later) : 0
+  return { row, since: open.since, shown, hidden: all.length - shown.length, fresh, page, pages, moved, identityPage: open.identityPage, reasonSeq: open.reasonSeq }
 }
 
 /**
