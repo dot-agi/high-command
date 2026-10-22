@@ -4,7 +4,7 @@
   <img src="https://img.shields.io/badge/Claude_Code-2.1.288%2B-D97757" alt="Claude Code 2.1.288+">
   <img src="https://img.shields.io/badge/type-mod-555555" alt="mod">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-555555" alt="License: MIT"></a>
-  <img src="https://img.shields.io/badge/version-1.1.2-555555" alt="Version: 1.1.2">
+  <img src="https://img.shields.io/badge/version-1.2.0-555555" alt="Version: 1.2.0">
 </p>
 
 <p align="center"><strong>One inbox for agent-team teammates, named subagents, and other Claude Code sessions.</strong></p>
@@ -33,14 +33,6 @@ When your session works with other agents, their messages arrive in the transcri
 - **Idle notices and peer states.** A teammate's idle notice with no content only updates its state. A notice that carries the teammate's final answer or failure shows as a message. When Claude runs ListAgents, High Command notes the state of each listed peer, such as busy, idle, or offline, and shows it on that peer's row once the peer has messages.
 - **Read-only.** High Command never starts a model turn and never changes a message, a send, or a tool result.
 
-![High Command pane roster with three peers: scout 2 new and tester 1 new as verified sender, helper 2 new as local sender.](docs/images/pane.svg)
-
-*The roster: three peers with unread counts and sender labels.*
-
-![High Command thread for helper, newest first: its finished notice as verified sender, then its message build finished, 3 warnings as local sender, both new.](docs/images/thread.svg)
-
-*The helper thread, newest first, shows its message and finished notice.*
-
 ## How it works
 
 ```mermaid
@@ -57,7 +49,7 @@ flowchart LR
 
 - **Messages in**: High Command records each message to your main conversation after Claude Code and the other mods have handled it, so it shows the text that Claude reads. In Claude Code 2.1.296, a named subagent's message does not pass `session.receive`. Claude Code submits it as a prompt from a peer, so High Command reads it in `prompt.submit`, both while the session is idle and during a turn. Task notifications, scheduled prompts, and your own Remote Control prompts are not recorded. A message that another mod consumes, or that you decline in an approval dialog, never reaches Claude, so High Command does not record it.
 - **Messages out**: each plain-text SendMessage that Claude makes in your main conversation, with its reported result. A message to an agent that has no name, and a message that another mod in your session sends, are not recorded. [Known limits](#known-limits) names the other sends that High Command cannot see.
-- **Agent lanes**: local agents' messages go to one lane per agent. The pane opens on the main inbox. Its agent selector switches lanes, and the pane stays on the lane you pick, also when you view an agent's transcript.
+- **Agent lanes**: local agents' messages go to one lane per agent. The pane opens on the main inbox. Its **Agent lanes** section switches lanes, and the pane stays on the lane you pick, also when you view an agent's transcript.
 - **Unread**: a message is unread until you open its peer's thread, press **Mark read** in that thread, or press **Read all**. Messages that Claude sends are never unread.
 
 ## Install
@@ -134,9 +126,16 @@ claude plugin update high-command@high-command --json
 | `r` | Band or pane roster | Mark every message read |
 | `h` | Band | Hide the band until a newer message arrives |
 | `1`-`9` | Pane roster | Open the thread of that peer |
-| `b` | Pane thread | Back to the roster |
+| `p`, `n` | Pane roster | Previous or next page of peers |
+| `m` | Pane roster | Show the main inbox |
+| `b` | Pane thread, identity, or agent lane | Back up one level |
+| `i` | Pane thread | Show the peer's full name |
 | `r` | Pane thread | Mark that peer read, only while **Mark read** shows |
+| `p`, `n` | Pane thread | Newer or older page |
+| `p`, `n` | Pane identity | Previous or next part of the name |
 | Esc | Band or pane | Give the keyboard back to the prompt |
+
+In the terminal, the pane shows each letter and digit key before its button's label, as in `r: Read all`. The agent buttons, the agent pages, **Agent status**, and **Show send details** have no key: press Tab to reach them, or click them. When the pane's location line has room, it ends with the dim hint `ctrl+x tab or click for keys · esc to prompt`.
 
 When the band's row has room, it ends with the dim hint `ctrl+x tab to choose`. Press Ctrl+X, then Tab, to give the band the keyboard. Then Tab moves between its buttons, Enter presses one, and Esc gives the keyboard back to the prompt.
 
@@ -188,9 +187,9 @@ The list below holds the limits you can hit in daily use. [docs/usage.md](docs/u
 <summary>Read the limits you can hit in daily use</summary>
 
 - **Agent lanes**: messages that local agents send and receive go to a separate lane for each agent. Each lane has its own counts and read marks. The pane shows each lane's unread count on that agent's button, and `/highcommand` lists the counts apart from the main inbox. By default, the band, the status line, and **Hide** cover the main inbox only, so an unread message in an agent lane does not show there. The `agentLanesInBand` [option](#options) adds the unread count of all agent lanes to the band and the status line. A message between your main conversation and a local agent can show twice, once in the main inbox and once in that agent's lane. The lane copy of a message from your main conversation never counts as unread. High Command does not see messages between teammates that run in their own split panes.
-- **Local agent status**: the status under each agent button in the pane, and in `/highcommand`, names its source. A `roster snapshot` status comes from Claude Code's local agent list. High Command reads that list when you open the pane or run `/highcommand`, when an agent starts, and when an agent ends a turn. Between reads, the status can be old. When two reads overlap, the older one can bring back an agent that the newer one removed. Open the pane or run `/highcommand` again after agent activity settles. A `lifecycle observation` says how an agent's last turn ended, such as `turn answered` or `turn error`. When the list does not hold an agent that ended a turn, an open pane shows that observation as the agent's status until the next read of the list. It describes a finished turn, so it does not prove that the agent still runs. A teammate in its own split pane can keep its last status after it crashes. `/highcommand` lists up to 100 local agents. The pane pages through all of them, 10 at a time.
+- **Local agent status**: in the pane, **Agent status** comes after the agent buttons, on their last row when it fits. It shows the status of each agent on the page, with a dim note that a roster snapshot does not confirm that an agent still runs. That status, and the one in `/highcommand`, names its source. A `roster snapshot` status comes from Claude Code's local agent list. High Command reads that list when you open the pane or run `/highcommand`, when an agent starts, and when an agent ends a turn. Between reads, the status can be old. When two reads overlap, the older one can bring back an agent that the newer one removed. Open the pane or run `/highcommand` again after agent activity settles. A `lifecycle observation` says how an agent's last turn ended, such as `turn answered` or `turn error`. When the list does not hold an agent that ended a turn, an open pane shows that observation as the agent's status until the next read of the list. It describes a finished turn, so it does not prove that the agent still runs. A teammate in its own split pane can keep its last status after it crashes. `/highcommand` lists up to 100 local agents. The pane pages through all of them, up to 10 at a time.
 - **Peer states**: a peer's roster row shows only states from teammates' notices and ListAgents results, never the local agent status. A state is the last one reported, with its time, so it does not prove that the peer is in that state now. When two rows of one ListAgents result have the same name, High Command cannot tell whose state is whose. When the result lists its rows as data, High Command takes no state for that name, so a state recorded earlier, such as `offline`, stays on that peer's row. When the result holds only the printed listing, that name gets the state of the last such row that has one.
-- **Send results**: a send shows the recipient and text that High Command observed, and the result reported back to High Command. **Send details** shows what Claude Code itself received, which another mod may have changed, and whether Claude Code queued the message. When a mod answers the send itself, Send details cannot show this. When a mod sends the message more than once, Send details covers only one of those sends. A refused send shows the first 120 characters of the reason, on one line, in its header. **Send details** keeps up to 2,000 characters of the reason, with its line breaks, and says when it was cut. A queued message is not proof that the peer read it.
+- **Send results**: a send shows the recipient and text that High Command observed, and the result reported back to High Command. **Show send details** shows what Claude Code itself received, which another mod may have changed, and whether Claude Code queued the message. When a mod answers the send itself, Send details cannot show this. When a mod sends the message more than once, Send details covers only one of those sends. A refused send shows the first 120 characters of the reason, on one line, in its reported send result. **Send details** keeps up to 2,000 characters of the reason, with its line breaks, and says when it was cut. A queued message is not proof that the peer read it.
 - **Structured sends**: Claude Code passes only plain-text SendMessage messages to High Command. A SendMessage whose message is a `shutdown_request`, `shutdown_response`, or `plan_approval_response` object does not reach it. Neither its attempt nor its result appears in the main inbox, an agent lane, or `/highcommand`. Check the transcript for these sends.
 - **No earlier history**: High Command starts empty in each new session and conversation. `/clear`, `/resume`, and `/branch` empty it again, so a resumed conversation shows none of its earlier messages. The pane and `/highcommand` say when the capture window began. After these commands, they also say that earlier history was not restored.
 - **Display only**: High Command changes nothing that Claude reads. Its inbox leaves out idle notices with no content, but Claude still reads them, so the inbox saves no model turns or tokens.

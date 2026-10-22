@@ -36,7 +36,7 @@ function oneLine(text: string): string {
 }
 
 /** The first line that holds a non-space character, as one line; '' when there is none. */
-function firstLine(text: string): string {
+export function firstLine(text: string): string {
   const line = text.split('\n').find(part => part.trim() !== '')
   return line === undefined ? '' : oneLine(line)
 }
@@ -73,21 +73,46 @@ function twoDigits(value: number): string {
   return String(value).padStart(2, '0')
 }
 
+/** `HH:MM` in local time. */
+export function timeLabel(at: number): string {
+  const time = new Date(at)
+  return `${twoDigits(time.getHours())}:${twoDigits(time.getMinutes())}`
+}
+
+/** The local day, as in `Oct 4`. */
+export function dayLabel(at: number): string {
+  const time = new Date(at)
+  return `${MONTHS[time.getMonth()]} ${time.getDate()}`
+}
+
+/** Whether two times fall on one local day. */
+export function isSameDay(at: number, other: number): boolean {
+  const one = new Date(at)
+  const two = new Date(other)
+  return one.getFullYear() === two.getFullYear() && one.getMonth() === two.getMonth() && one.getDate() === two.getDate()
+}
+
 /** `HH:MM` on the local day of `now`, else `Mon D HH:MM`. */
 export function clockLabel(at: number, now: number): string {
-  const time = new Date(at)
-  const today = new Date(now)
-  const hhmm = `${twoDigits(time.getHours())}:${twoDigits(time.getMinutes())}`
-  const isToday =
-    time.getFullYear() === today.getFullYear() &&
-    time.getMonth() === today.getMonth() &&
-    time.getDate() === today.getDate()
-  return isToday ? hhmm : `${MONTHS[time.getMonth()]} ${time.getDate()} ${hhmm}`
+  return isSameDay(at, now) ? timeLabel(at) : `${dayLabel(at)} ${timeLabel(at)}`
 }
 
 /** A state with the clock time it was reported, as in `idle (12:04)`; undefined without a state. */
 export function stateLabel(state: HighCommandState | undefined, now: number): string | undefined {
   return state === undefined ? undefined : `${state.word} (${clockLabel(state.at, now)}${state.source ? `; ${state.source}; last reported` : ''})`
+}
+
+/**
+ * A state as the roster shows it, as in `idle at 12:04`, whole: the roster row cuts it only when the row is full.
+ * Undefined without a state. The thread shows its source (threadState).
+ */
+export function rosterState(state: HighCommandState | undefined, now: number): string | undefined {
+  return state === undefined ? undefined : `${state.word} at ${clockLabel(state.at, now)}`
+}
+
+/** A state as a thread shows it, as in `State idle at 12:04 · peer notice · last reported`; the source only when known. */
+export function threadState(state: HighCommandState, now: number): string {
+  return `State ${state.word} at ${clockLabel(state.at, now)}${state.source ? ` · ${state.source} · last reported` : ''}`
 }
 
 /**
@@ -144,6 +169,9 @@ export function unreadText(main: number, lanes = 0): string {
 /** The dim hint at the end of the band's row: the keys that give the band the keyboard. */
 export const BAND_KEY_HINT = 'ctrl+x tab to choose'
 
+/** The dim hint at the end of the pane's location row: how to give the pane the keys, and how to give them back. */
+export const PANE_KEY_HINT = 'ctrl+x tab or click for keys · esc to prompt'
+
 /**
  * Code points a terminal can draw two cells wide, in broad ranges: Hangul, CJK, full-width forms, the emoji of the
  * symbol blocks, and every code point past U+FFFF.
@@ -174,16 +202,107 @@ export function peerKey(name: string): string {
   return oneLine(sanitize(name).replace(FORMAT, ''))
 }
 
-/** A display label for a normalized peer identity, clipped without changing its state key. */
-export function peerLabel(peer: string): string {
-  if (peer.length <= LIMITS.nameChars) return peer
+/** The 32-bit FNV-1a hash of a text's UTF-16 units, as 8 hexadecimal digits. */
+function fnv1a(text: string): string {
   let hash = 2166136261
-  for (let index = 0; index < peer.length; index++) hash = Math.imul(hash ^ peer.charCodeAt(index), 16777619)
-  return `${clip(peer, LIMITS.nameChars - 11)} [${(hash >>> 0).toString(16).padStart(8, '0')}]`
+  for (let index = 0; index < text.length; index++) hash = Math.imul(hash ^ text.charCodeAt(index), 16777619)
+  return (hash >>> 0).toString(16).padStart(8, '0')
 }
 
-/** Resolves even hash collisions across the current retained roster. */
-export function peerLabels(peers: readonly string[]): Map<string, string> {
+/** A display label for a normalized peer identity, clipped without changing its state key. */
+export function peerLabel(peer: string): string {
+  return peer.length <= LIMITS.nameChars ? peer : `${clip(peer, LIMITS.nameChars - 11)} [${fnv1a(peer)}]`
+}
+
+/**
+ * The text's start and end around `…`, in at most `max` cells (cellWidth): the start takes the odd cell. Look-alike
+ * names mostly differ at their end, so this keeps both the shared start and the part that tells them apart.
+ */
+function clipMiddle(text: string, max: number): string {
+  const chars = [...text]
+  let head = ''
+  let headCells = 0
+  for (const char of chars) {
+    if (headCells + cellWidth(char) > Math.ceil((max - 1) / 2)) break
+    head += char
+    headCells += cellWidth(char)
+  }
+  let tail = ''
+  let tailCells = 0
+  for (const char of chars.reverse()) {
+    if (tailCells + cellWidth(char) > max - 1 - headCells) break
+    tail = char + tail
+    tailCells += cellWidth(char)
+  }
+  return `${head}…${tail}`
+}
+
+/** The text whole when it takes at most `max` cells (cellWidth), else its start and end around `…` (clipMiddle). */
+function cutCells(text: string, max: number): string {
+  return cellWidth(text) <= max ? text : clipMiddle(text, max)
+}
+
+/** Hexadecimal digits of the code that tells look-alike cut labels apart. */
+const CODE_DIGITS = 4
+
+/**
+ * A peer's label in `cells` cells, at one of two steps, each from the name alone. Step 0: the name, or its start and end
+ * when it is wider. Step 1: a shorter cut and the first CODE_DIGITS digits of the name's FNV-1a hash, as in
+ * `rele…west [3f9a]`.
+ */
+function cellLabel(peer: string, cells: number, step: number): string {
+  return step === 0 ? cutCells(peer, cells) : `${cutCells(peer, cells - CODE_DIGITS - 3)} [${fnv1a(peer).slice(0, CODE_DIGITS)}]`
+}
+
+/**
+ * Labels in `cells` cells, at least 12, for the fixed roster columns. A peer shows its step 0 label (cellLabel) while
+ * no other peer shows the same text, else its step 1 label, so a label passes to no other peer. A step 0 label that
+ * reads as another peer's step 1 label also moves, so a name cannot copy a coded label. Peers whose step 1 labels still
+ * match, which takes equal cuts and an equal code, are numbered in name order, apart from every other label.
+ */
+function cellLabels(peers: readonly string[], cells: number): Map<string, string> {
+  const steps = new Map(peers.map(peer => [peer, 0]))
+  const labelOf = (peer: string) => cellLabel(peer, cells, steps.get(peer)!)
+  for (let isMoved = true; isMoved;) {
+    isMoved = false
+    const counts = new Map<string, number>()
+    for (const peer of peers) counts.set(labelOf(peer), (counts.get(labelOf(peer)) ?? 0) + 1)
+    for (const peer of peers) {
+      if (steps.get(peer) === 0 && counts.get(labelOf(peer))! > 1) {
+        steps.set(peer, 1)
+        isMoved = true
+      }
+    }
+  }
+  const groups = new Map<string, string[]>()
+  for (const peer of [...peers].sort()) groups.set(labelOf(peer), [...(groups.get(labelOf(peer)) ?? []), peer])
+  const result = new Map<string, string>()
+  const reserved = new Set(groups.keys())
+  for (const [label, group] of groups) {
+    if (group.length === 1) {
+      result.set(group[0]!, label)
+      continue
+    }
+    let index = 0
+    for (const peer of group) {
+      let resolved: string
+      do {
+        index += 1
+        resolved = `${cutCells(peer, cells - 3 - String(index).length)} [${index}]`
+      } while (reserved.has(resolved))
+      reserved.add(resolved)
+      result.set(peer, resolved)
+    }
+  }
+  return new Map(peers.map(peer => [peer, result.get(peer)!]))
+}
+
+/**
+ * Resolves even hash collisions across the current retained roster. With `cells`, labels fit that many cells
+ * (cellLabels).
+ */
+export function peerLabels(peers: readonly string[], cells?: number): Map<string, string> {
+  if (cells !== undefined) return cellLabels([...new Set(peers)], cells)
   const groups = new Map<string, string[]>()
   for (const peer of new Set(peers)) {
     const label = peerLabel(peer)
@@ -204,6 +323,22 @@ export function peerLabels(peers: readonly string[]): Map<string, string> {
     }
   }
   return result
+}
+
+/**
+ * Button keys for peer rows that stay with the peer when the roster order changes: `peer:` and the FNV-1a hash of the
+ * full identity, with `-2`, `-3`, ... for the later names, in name order, that share a hash.
+ */
+export function peerKeys(peers: readonly string[]): Map<string, string> {
+  const keys = new Map<string, string>()
+  const taken = new Map<string, number>()
+  for (const peer of [...new Set(peers)].sort()) {
+    const hash = fnv1a(peer)
+    const count = (taken.get(hash) ?? 0) + 1
+    taken.set(hash, count)
+    keys.set(peer, count === 1 ? `peer:${hash}` : `peer:${hash}-${count}`)
+  }
+  return keys
 }
 
 /** A conversation-local marker, preserved across module reloads. */

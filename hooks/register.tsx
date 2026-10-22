@@ -27,8 +27,8 @@ import {
 } from './inbox'
 import { parseListing, parseStructuredListing } from './listing'
 import { summaryText } from './summary'
-import { count, sanitize, peerKey, peerLabels, unreadText } from './text'
-import { bandTree, compactBandTree, fitsBounds, paneTree, type BandActions, type PaneActions } from './views'
+import { count, sanitize, peerKey, peerKeys, peerLabels, unreadText } from './text'
+import { bandTree, compactBandTree, fitsBounds, laneIdsOf, laneIdsShown, paneTree, rosterPageOf, type BandActions, type PaneActions } from './views'
 
 const DESCRIPTION = 'High Command: messages from teammates and other sessions (/highcommand open shows the pane)'
 const PANE = { id: 'high-command', title: 'High Command', focus: true } as const
@@ -55,6 +55,7 @@ const lanes = atom(LANES, {})
 const hiddenLanes = atom({ plugin: 'high-command', key: 'hiddenLanes' } as const, {})
 const selectedLane = atom({ plugin: 'high-command', key: 'selectedLane' } as const, null)
 const lanePage = atom({ plugin: 'high-command', key: 'lanePage' } as const, 0)
+const agentStatus = atom({ plugin: 'high-command', key: 'agentStatus' } as const, false)
 const rosterPage = atom({ plugin: 'high-command', key: 'rosterPage' } as const, 0)
 const agents = atom({ plugin: 'high-command', key: 'agents' } as const, {})
 const capture = atom({ plugin: 'high-command', key: 'capture' } as const, null)
@@ -316,6 +317,45 @@ function readAll($: EngineInterface, withLanes: boolean): Promise<void> {
   })
 }
 
+/**
+ * Moves the pane's focus ring onto the element `key` after a view change, so the person keeps their place. The keys
+ * are the person's to give: a site that does not hold them refuses, and the view change stands.
+ */
+async function focusOn($: EngineInterface, key: string | undefined): Promise<void> {
+  if (key === undefined) return
+  try {
+    await $.ui.focus({ requestId: PANE.id, key })
+  } catch {
+    // Refused: the person holds the keys elsewhere, or the element is gone. Nothing to report.
+  }
+}
+
+/**
+ * Shows the roster page that draws `peer`'s row and returns that row's key. The thread can move the row to another
+ * page: opening it marks the peer read, which sorts it behind the unread peers. Without the row (its messages left the
+ * window), the page stays and there is no key.
+ */
+async function showPeerRow($: EngineInterface, laneId: string | undefined, peer: string): Promise<string | undefined> {
+  const { rows } = await readRoster($, laneId)
+  const page = rosterPageOf(rows, peer)
+  if (page === undefined) return undefined
+  if (laneId === undefined) await update($, rosterPage, () => page)
+  else await changeLane($, laneId, lane => ({ ...lane, rosterPage: page }))
+  return peerKeys(rows.map(row => row.peer)).get(peer)
+}
+
+/** Whether the lane page shown draws the agent `id`'s lane Button. */
+async function isLaneShown($: EngineInterface, id: string): Promise<boolean> {
+  const all = Object.values(await read($, agents))
+  return laneIdsShown(laneIdsOf(Object.keys(await read($, lanes)), all), await read($, lanePage), all).includes(id)
+}
+
+/** Where the ring goes once the lane `id` ('' for the main inbox) shows: Back of its open thread, else `key`. */
+async function laneFocus($: EngineInterface, id: string, key: string): Promise<string> {
+  const open = id === '' ? await read($, openThread) : (await readLane($, id)).openThread
+  return open === null ? key : 'pane:back'
+}
+
 function paneActions($: EngineInterface, withLanes: boolean, laneId?: string): PaneActions {
   /** Any change of a lane can evict lane messages (fitLanes); with agentLanesInBand, the status line then counts again. */
   const thenSync = (work: () => Promise<unknown>) => async (): Promise<void> => {
@@ -329,19 +369,47 @@ function paneActions($: EngineInterface, withLanes: boolean, laneId?: string): P
       const from = newestSeq(lane?.entries ?? await read($, entries))
       await changeThread($, laneId, () => ({ peer, since: markOf(marks, peer), from }))
       await markPeersRead($, peer, laneId, withLanes)
+      await focusOn($, 'pane:back')
     }),
-    back: () => press($, 'back', thenSync(() => changeThread($, laneId, () => null))),
+    // Up one level, to the roster page that draws the peer that was open, with the ring on its row.
+    back: () => press($, 'back', thenSync(async () => {
+      const closed: { peer?: string } = {}
+      await changeThread($, laneId, open => {
+        closed.peer = open?.peer
+        return null
+      })
+      if (closed.peer !== undefined) await focusOn($, await showPeerRow($, laneId, closed.peer))
+    })),
     markRead: peer => press($, 'mark read', () => markPeersRead($, peer, laneId, withLanes)),
     readAll: () => press($, 'read all', () => markPeersRead($, undefined, laneId, withLanes)),
     page: page => press($, 'page', thenSync(() => changeThread($, laneId, open => open === null ? null : { ...open, page }))),
-    identity: identityPage => press($, 'identity', thenSync(() => changeThread($, laneId, open => open === null ? null : { ...open, identityPage }))),
+    // Opening the Identity level puts the ring on its Back; closing it puts the ring back on Show identity.
+    identity: identityPage => press($, 'identity', thenSync(async () => {
+      const before: { wasOpen?: boolean } = {}
+      await changeThread($, laneId, open => {
+        before.wasOpen = open?.identityPage !== undefined
+        return open === null ? null : { ...open, identityPage }
+      })
+      if (identityPage === undefined) await focusOn($, 'pane:identity')
+      else if (before.wasOpen === false) await focusOn($, 'pane:back')
+    })),
     reason: reasonSeq => press($, 'send details', thenSync(() => changeThread($, laneId, open => open === null ? null : { ...open, reasonSeq: open.reasonSeq === reasonSeq ? undefined : reasonSeq }))),
-    lane: id => press($, 'select lane', () => update($, selectedLane, () => id)),
+    lane: id => press($, 'select lane', async () => {
+      await update($, selectedLane, () => id)
+      await focusOn($, await laneFocus($, id, id === '' ? 'lane:main' : `lane:${id}`))
+    }),
+    // Up one level from an agent lane, to the main inbox, with the ring on the Button of the lane that was open.
+    leaveLane: () => press($, 'back', async () => {
+      await update($, selectedLane, () => '')
+      const key = laneId !== undefined && await isLaneShown($, laneId) ? `lane:${laneId}` : 'lane:main'
+      await focusOn($, await laneFocus($, '', key))
+    }),
     rosterPage: page => press($, 'peer page', thenSync(async () => {
       if (laneId === undefined) await update($, rosterPage, () => page)
       else await changeLane($, laneId, lane => ({ ...lane, rosterPage: page }))
     })),
     lanePage: page => press($, 'agent page', () => update($, lanePage, () => page)),
+    agentStatus: () => press($, 'agent status', () => update($, agentStatus, open => !open)),
   }
 }
 
@@ -532,6 +600,7 @@ export const register: Register = (on, options) => {
         laneIds: Object.keys(all), agents: Object.values(await read($, agents)),
         laneUnread: new Map(Object.entries(all).map(([id, lane]) => [id, unreadTotal(rosterOf(lane.entries, {}, lane.readThrough))])),
         capture: await read($, capture), evicted: list.at(-1)?.evictedTotal ?? 0,
+        columns: e.props.bodyColumns, statusOpen: await read($, agentStatus),
       }, paneActions($, withLanes, laneId))
     } catch (error) {
       const { Text } = ui

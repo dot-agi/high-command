@@ -23,6 +23,8 @@ export const LIMITS = {
   stateChars: 24,
   /** Peer rows on one roster page. */
   rosterRows: 50,
+  /** Agent lane Buttons on one lane page of the pane. */
+  laneButtons: 10,
   /** Entries drawn in one thread. */
   threadEntries: 20,
   /**
