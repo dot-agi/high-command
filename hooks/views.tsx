@@ -412,16 +412,19 @@ function stateCells(states: readonly (string | undefined)[], columns: number): n
   return Math.max(CELLS.state, Math.min(longest, columns - others - MESSAGE_CELLS))
 }
 
-/** The dim header row over the fixed roster columns; `state` is the cells of Last state. */
+/**
+ * The dim header row over the fixed roster columns; `state` is the cells of Last state. A Box can shrink by default,
+ * so each fixed cell sets `flexShrink={0}`: only Last message gives up room, as in each row (columnsRow).
+ */
 function columnsHeader({ Box, Text }: HighCommandElements, state: number): RenderElement {
   return (
     <Box flexDirection="row" columnGap={1}>
-      <Box width={CELLS.peer} paddingLeft={GUTTER}><Text dimColor>Peer</Text></Box>
-      <Box width={CELLS.fresh} justifyContent="flex-end"><Text dimColor>New</Text></Box>
-      <Box width={CELLS.time} justifyContent="flex-end"><Text dimColor>Time</Text></Box>
-      <Box width={CELLS.sender}><Text dimColor>Sender</Text></Box>
-      <Box width={state}><Text dimColor>Last state</Text></Box>
-      <Box flexGrow={1}><Text dimColor>Last message</Text></Box>
+      <Box width={CELLS.peer} flexShrink={0} paddingLeft={GUTTER}><Text dimColor>Peer</Text></Box>
+      <Box width={CELLS.fresh} flexShrink={0} justifyContent="flex-end"><Text dimColor>New</Text></Box>
+      <Box width={CELLS.time} flexShrink={0} justifyContent="flex-end"><Text dimColor>Time</Text></Box>
+      <Box width={CELLS.sender} flexShrink={0}><Text dimColor>Sender</Text></Box>
+      <Box width={state} flexShrink={0}><Text dimColor>Last state</Text></Box>
+      <Box flexGrow={1} flexShrink={1} minWidth={0}><Text dimColor>Last message</Text></Box>
     </Box>
   )
 }
@@ -429,7 +432,8 @@ function columnsHeader({ Box, Text }: HighCommandElements, state: number): Rende
 /**
  * A roster row in fixed columns, from COLUMNS_FROM cells: the peer (its label cut to 16 cells), the unread count, the
  * time (the date alone on another day), the sender level, the state in `stateWidth` cells (stateCells), and the latest
- * message. Any `suspicious` and `(not delivered)` marks start it, within the MESSAGE_CELLS it always keeps.
+ * message. Any `suspicious` and `(not delivered)` marks start it, within the MESSAGE_CELLS it always keeps. Each fixed
+ * cell, the gutter and peer cell too, keeps its width (`flexShrink={0}`); only Last message shrinks, and is cut there.
  */
 function columnsRow(ui: HighCommandElements, args: RosterRowArgs, stateWidth: number): RenderElement {
   const { Box, Text } = ui
@@ -439,14 +443,14 @@ function columnsRow(ui: HighCommandElements, args: RosterRowArgs, stateWidth: nu
   const state = rosterState(row.state, now)
   return (
     <Box flexDirection="row" columnGap={1}>
-      <Box width={CELLS.peer} {...(index < LIMITS.hotkeys ? {} : { paddingLeft: GUTTER })}>{peerButton(ui, args)}</Box>
-      <Box width={CELLS.fresh} justifyContent="flex-end">{row.unread > 0 && <Text bold>{String(row.unread)}</Text>}</Box>
-      <Box width={CELLS.time} justifyContent="flex-end">
+      <Box width={CELLS.peer} flexShrink={0} {...(index < LIMITS.hotkeys ? {} : { paddingLeft: GUTTER })}>{peerButton(ui, args)}</Box>
+      <Box width={CELLS.fresh} flexShrink={0} justifyContent="flex-end">{row.unread > 0 && <Text bold>{String(row.unread)}</Text>}</Box>
+      <Box width={CELLS.time} flexShrink={0} justifyContent="flex-end">
         <Text {...dim}>{isSameDay(row.last.at, now) ? timeLabel(row.last.at) : dayLabel(row.last.at)}</Text>
       </Box>
-      <Box width={CELLS.sender}>{row.trust !== undefined && <Text {...trustColor(row.trust)}>{row.trust}</Text>}</Box>
-      <Box width={stateWidth}>{state !== undefined && <Text {...dim} wrap="truncate-end">{state}</Text>}</Box>
-      <Box flexGrow={1}>
+      <Box width={CELLS.sender} flexShrink={0}>{row.trust !== undefined && <Text {...trustColor(row.trust)}>{row.trust}</Text>}</Box>
+      <Box width={stateWidth} flexShrink={0}>{state !== undefined && <Text {...dim} wrap="truncate-end">{state}</Text>}</Box>
+      <Box flexGrow={1} flexShrink={1} minWidth={0}>
         <Text {...(isRead ? {} : { bold: true })} wrap="truncate-end">
           {row.isSuspicious && [<Text color="warning">suspicious</Text>, ' ']}
           {messageSpans(Text, row.last, isRead, true)}
@@ -581,8 +585,9 @@ type EntryArgs = { isFresh: boolean; isOpen: boolean; hasSendNote: boolean; hasD
 
 /**
  * One thread entry: the send note above the first send of the page, a day line above the first entry of an earlier
- * day, a header of fixed cells (new, time, arrow, kind) and the trust marks, the reported send result on a line of its
- * own, the summary only when the sender wrote one that the body does not start with, the body, and Send details.
+ * day, a header of fixed cells (new, time, arrow, kind) that never shrink and the trust marks, which alone shrink and
+ * wrap, the reported send result on a line of its own, the summary only when the sender wrote one that the body does
+ * not start with, the body, and Send details.
  */
 function entryView(ui: HighCommandElements, entry: HighCommandEntry, args: EntryArgs, actions: PaneActions): RenderElement {
   const { Box, Text, Button } = ui
@@ -599,11 +604,11 @@ function entryView(ui: HighCommandElements, entry: HighCommandEntry, args: Entry
       {args.hasSendNote && <Box paddingLeft={4}><Text dimColor wrap="wrap">{SEND_NOTE}</Text></Box>}
       {args.hasDayLine && <Box paddingLeft={4}><Text dimColor>{dayLabel(entry.at)}</Text></Box>}
       <Box flexDirection="row" columnGap={1}>
-        <Box width={3}>{isFresh && <Text bold>new</Text>}</Box>
-        <Box width={5}><Text {...weight}>{timeLabel(entry.at)}</Text></Box>
-        <Text {...weight}>{arrow}</Text>
-        <Box width={15}><Text {...weight}>{entry.direction === 'out' ? 'send attempted' : word}</Text></Box>
-        {marks.length > 0 && <Text wrap="wrap">{marks}</Text>}
+        <Box width={3} flexShrink={0}>{isFresh && <Text bold>new</Text>}</Box>
+        <Box width={5} flexShrink={0}><Text {...weight}>{timeLabel(entry.at)}</Text></Box>
+        <Box width={1} flexShrink={0}><Text {...weight}>{arrow}</Text></Box>
+        <Box width={15} flexShrink={0}><Text {...weight}>{entry.direction === 'out' ? 'send attempted' : word}</Text></Box>
+        {marks.length > 0 && <Box flexShrink={1} minWidth={0}><Text wrap="wrap">{marks}</Text></Box>}
       </Box>
       {delivery !== undefined && (
         <Box paddingLeft={10}>
