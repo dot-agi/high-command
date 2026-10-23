@@ -33,6 +33,14 @@ When your session works with other agents, their messages arrive in the transcri
 - **Idle notices and peer states.** A teammate's idle notice with no content only updates its state. A notice that carries the teammate's final answer or failure shows as a message. When Claude runs ListAgents, High Command notes the state of each listed peer, such as busy, idle, or offline, and shows it on that peer's row once the peer has messages.
 - **Read-only.** High Command never starts a model turn and never changes a message, a send, or a tool result.
 
+![High Command pane roster in fixed columns with three peers: helper 2 new with a suspicious mark, researcher 3 new, and tester 2 new, each an unverified sender, with the agent lanes below.](docs/images/pane.svg)
+
+*The roster: one row per peer, warning marks first in the last message.*
+
+![High Command thread for researcher, newest first: its finished notice, then its two messages, all new.](docs/images/thread.svg)
+
+*The researcher thread, newest first, with Back, the state, and the sender label at the top.*
+
 ## How it works
 
 ```mermaid
