@@ -1,6 +1,6 @@
 import type { BoxProps, ButtonProps, ElementConstructor, RenderElement, TextProps } from 'claude-code'
 
-import type { HighCommandAgent, HighCommandCapture, HighCommandEntry, HighCommandTrust } from '../types'
+import type { HighCommandAgent, HighCommandCapture, HighCommandEntry } from '../types'
 import { isNewer, labelOf, unreadTotal, type RosterRow, type Thread } from './inbox'
 import { LIMITS } from './limits'
 import {
@@ -255,11 +255,6 @@ function laneTitle(model: PaneModel): string {
   return `Agent observations: ${agentName(model.agents?.find(agent => agent.id === model.laneId), model.laneId)}`
 }
 
-/** Color `warning` for the weakest sender label, as for `suspicious`; the words stay, so color only adds a signal. */
-function trustColor(trust: HighCommandTrust | undefined): TextProps {
-  return trust === 'unverified' ? { color: 'warning' } : {}
-}
-
 /**
  * Row 1 of every view: Back where there is a level above, a dim prefix that truncates from its start, the current place
  * in bold, and the dim key hint when the row and the hint fit `columns`, the band's rule. While the place fits the row
@@ -368,7 +363,9 @@ function twoLineRow(ui: HighCommandElements, args: RosterRowArgs, columns: numbe
   const trust = trustLabel(row.trust)
   const button = peerButton(ui, args)
   const marks = dotted([
-    trust !== undefined && [styled(Text, trust, trustColor(row.trust))],
+    // Every sender label is plain text: in tmux each teammate's pane makes every message `unverified sender`, and a
+    // color there would hide a real `suspicious`.
+    trust !== undefined && [trust],
     row.isSuspicious && [<Text color="warning">suspicious</Text>],
     isRefused(row.last) && [<Text color="error">{NOT_DELIVERED}</Text>],
   ])
@@ -448,7 +445,7 @@ function columnsRow(ui: HighCommandElements, args: RosterRowArgs, stateWidth: nu
       <Box width={CELLS.time} flexShrink={0} justifyContent="flex-end">
         <Text {...dim}>{isSameDay(row.last.at, now) ? timeLabel(row.last.at) : dayLabel(row.last.at)}</Text>
       </Box>
-      <Box width={CELLS.sender} flexShrink={0}>{row.trust !== undefined && <Text {...trustColor(row.trust)}>{row.trust}</Text>}</Box>
+      <Box width={CELLS.sender} flexShrink={0}>{row.trust !== undefined && <Text>{row.trust}</Text>}</Box>
       <Box width={stateWidth} flexShrink={0}>{state !== undefined && <Text {...dim} wrap="truncate-end">{state}</Text>}</Box>
       <Box flexGrow={1} flexShrink={1} minWidth={0}>
         <Text {...(isRead ? {} : { bold: true })} wrap="truncate-end">
@@ -595,7 +592,7 @@ function entryView(ui: HighCommandElements, entry: HighCommandEntry, args: Entry
   const weight: TextProps = isFresh ? { bold: true } : {}
   const { arrow, word } = labelOf(entry)
   const marks = dotted([
-    entry.trust !== undefined && [styled(Text, trustLabel(entry.trust)!, trustColor(entry.trust))],
+    entry.trust !== undefined && [trustLabel(entry.trust)!],
     entry.isSuspicious === true && [<Text color="warning">suspicious</Text>],
   ])
   const delivery = entry.delivery
@@ -656,7 +653,7 @@ function threadView(ui: HighCommandElements, model: PaneModel, thread: Thread, a
   const { Box, Text, Button } = ui
   const { row, since, shown, hidden, fresh } = thread
   const facts = dotted([
-    row.trust !== undefined && ['Sender ', styled(Text, row.trust, trustColor(row.trust))],
+    row.trust !== undefined && [`Sender ${row.trust}`],
     [count(shown.length + hidden, 'retained message')],
     fresh > 0 && [`${fresh} new`],
     thread.pages > 1 && [`page ${thread.page + 1} of ${thread.pages}`],
