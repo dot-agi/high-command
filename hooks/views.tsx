@@ -6,6 +6,7 @@ import { LIMITS } from './limits'
 import {
   BAND_KEY_HINT,
   PANE_KEY_HINT,
+  branchLabel,
   cellWidth,
   clockLabel,
   count,
@@ -284,14 +285,16 @@ function locationRow(
   )
 }
 
-/** The dim context line: when capture began, this conversation only, the order; after a reset, that history is gone. */
+/**
+ * The dim context line: when capture began, this conversation only, the order; after a reset, that history is gone. A
+ * branch's line starts with the branch time and the messages it took from the parent conversation (branchLabel).
+ */
 function contextLine(Text: HighCommandElements['Text'], model: PaneModel): RenderElement | false {
   const capture = model.capture
-  return capture !== undefined && capture !== null && (
-    <Text dimColor wrap="wrap">
-      {`Since ${clockLabel(capture.at, model.now)} · this conversation only · observation order${capture.reset ? ' · earlier history not restored' : ''}`}
-    </Text>
-  )
+  if (capture === undefined || capture === null) return false
+  const since = clockLabel(capture.at, model.now)
+  const scope = capture.branch === undefined ? `Since ${since} · this conversation only` : `${branchLabel(capture.branch, model.now)} · since ${since}`
+  return <Text dimColor wrap="wrap">{`${scope} · observation order${capture.reset ? ' · earlier history not restored' : ''}`}</Text>
 }
 
 /** The notice of messages dropped for good, at full strength: it says whether the list is complete. */

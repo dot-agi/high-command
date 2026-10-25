@@ -7,12 +7,19 @@ export const LIMITS = {
   /** Characters of JSON text that one agent lane's entries keep; past it, that lane drops its own oldest entries first. */
   laneChars: 500_000,
   /**
-   * Characters of JSON text that all agent lanes keep together: they are saved as one value, and Claude Code 2.1.296
-   * refuses a value over 4,194,304 characters. Past it, the entries observed first drop; each lane keeps its newest.
+   * Characters of JSON text that all agent lanes keep together: their copy in `$.state` is one value, and Claude Code
+   * 2.1.296 refuses a value over 4,194,304 characters. Past it, the entries observed first drop; each lane keeps its newest.
    */
   lanesChars: 4_000_000,
+  /** Characters of JSON text in one saved value that Claude Code 2.1.296 accepts: a `$.state` value past it is refused. */
+  savedChars: 4_194_304,
   /** Peers kept; the ones reported least recently drop first. */
   peers: 100,
+  /**
+   * Conversations besides the current one whose inbox the process keeps in module memory, for a branch or a resume;
+   * the one used least recently drops first.
+   */
+  snapshots: 10,
   /** Characters of a body kept; the transcript keeps the rest. */
   bodyChars: 2000,
   /** Characters of a summary line. */

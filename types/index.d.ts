@@ -95,36 +95,73 @@ export type HighCommandAgent = {
   lastEvent?: { word: string; at: number }
 }
 
-export type HighCommandCapture = { at: number; reset: boolean }
+/**
+ * The capture window: when it began, and whether it began after a reset that dropped earlier history. A branch keeps
+ * its parent's window, and `branch` says when it branched and how many kept messages it took from the parent. `depth`
+ * counts the /branch steps from the conversation where the window began: 1 for its branch, 2 for a branch of that.
+ */
+export type HighCommandCapture = { at: number; reset: boolean; branch?: { at: number; messages: number; depth: number } }
+
+/**
+ * The copy of one conversation's inbox that `$.state` holds: what a reload of the mod takes back. The hooks module keeps
+ * the inbox itself in memory, and the pane and the band draw from there. `session` and `epoch` name the inbox it copies.
+ */
+export type HighCommandView = {
+  session: string
+  /** The number of the inbox in the module that wrote it; a branch copy and a fresh inbox each take a new one. */
+  epoch: number
+  /** Grows with each write: Claude Code draws the pane and the band again when it changes. */
+  revision: number
+  entries: HighCommandEntry[]
+  peers: Record<string, HighCommandPeer>
+  readThrough: Record<string, number>
+  /** The newest seq that a press of Hide had seen; 0 before any press. It only grows. */
+  hiddenThrough: number
+  /** The seq of the newest inbound entry recorded; it only grows and outlives the entry's eviction. */
+  inboundThrough: number
+  capture: HighCommandCapture | null
+  openThread: HighCommandThread | null
+  rosterPage: number
+  selectedLane: string | null
+  lanePage: number
+  /** Whether the pane's Agent status block is open. */
+  agentStatus: boolean
+  /** The local agents of the process, which every conversation shows. */
+  agents: Record<string, HighCommandAgent>
+}
+
+/** The copy of one conversation's agent lanes, apart from HighCommandView: each saved value has a size limit. */
+export type HighCommandLaneView = {
+  session: string
+  epoch: number
+  lanes: Record<string, HighCommandLane>
+  /**
+   * Per agent lane, the newest seq that a press of Hide had seen while agentLanesInBand is on; a mark only grows.
+   */
+  hiddenLanes: Record<string, number>
+}
 
 declare module 'claude-code' {
   interface PluginState {
     'high-command': {
-      lanes: Record<string, HighCommandLane>
-      selectedLane: string | null
-      lanePage: number
-      /** Whether the pane's Agent status block is open. */
-      agentStatus: boolean
-      rosterPage: number
-      agents: Record<string, HighCommandAgent>
-      capture: HighCommandCapture | null
+      view: HighCommandView
+      laneView: HighCommandLaneView
+      // The values of 1.2.2, which kept the inbox in `$.state` itself. After an update, when neither copy above holds
+      // anything, the module reads them once to take the inbox over, and never writes them.
       entries: HighCommandEntry[]
       peers: Record<string, HighCommandPeer>
       readThrough: Record<string, number>
       openThread: HighCommandThread | null
-      /** The newest seq that a press of Hide had seen; 0 before any press. It only grows. */
       hiddenThrough: number
-      /** The seq of the newest inbound entry recorded; it only grows and outlives the entry's eviction. */
       inboundThrough: number
-      /**
-       * Per agent lane, the newest seq that a press of Hide had seen while agentLanesInBand is on; a mark only grows.
-       */
+      lanes: Record<string, HighCommandLane>
       hiddenLanes: Record<string, number>
-      /**
-       * The status line as last pinned: the versions of `entries` and `readThrough` it counts, and its count. With
-       * agentLanesInBand on, also the version of `lanes` and the unread count of all agent lanes.
-       */
-      statusFrom: { entries: number; marks: number; unread: number; lanes?: number; laneUnread?: number }
+      capture: HighCommandCapture | null
+      selectedLane: string | null
+      lanePage: number
+      agentStatus: boolean
+      rosterPage: number
+      agents: Record<string, HighCommandAgent>
     }
   }
 }
