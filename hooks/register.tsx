@@ -1,5 +1,5 @@
 import { atom, read } from 'claude-code'
-import type { AgentInfo, CommandRunResult, EngineInterface, Register, SessionReceiveOrigin, SessionSendResult, TraceEntry } from 'claude-code'
+import type { AgentInfo, CommandRunResult, EngineInterface, Register, SessionReceiveOrigin, SessionSendResult, Timer, TraceEntry } from 'claude-code'
 
 import type { HighCommandAgent, HighCommandCapture, HighCommandEntry, HighCommandLane, HighCommandPeer, HighCommandThread, HighCommandView } from '../types'
 import { agentSenderOf, isAgentMessage, parseDelivery, spawnerOf, UNNAMED, type NewEntry, type PeerReport } from './envelope'
@@ -109,6 +109,14 @@ const inboxes = new Map<string, Inbox>()
 let current: string | undefined
 /** The session that ended last at a switch, until the next conversation starts: the parent of a branch. */
 let lastEnded: string | undefined
+/**
+ * The switch that session.end noted, until classic.SessionStart or settle takes it: its reason and the session that
+ * ended. With managed settings or a Team or Enterprise sign-in, Claude Code passes no classic event to installed mods,
+ * so only settle sees the switch.
+ */
+let pending: { reason: 'clear' | 'resume'; ended: string } | undefined
+/** The session that settle moved to since the last session.end: a classic.SessionStart for it changes no inbox. */
+let settled: string | undefined
 /** The local agents of the process: every conversation shows them. */
 let agents: Record<string, HighCommandAgent> = {}
 /** Counts the changes of module data: the mirror and the status line write only after one. */
@@ -393,12 +401,24 @@ let answered = 0
 /** The lane value the mirror wrote last; undefined once Claude Code resets `$.state` or a lane write may be stale. */
 let laneMirror: { session: string; epoch: number; lanes: Record<string, HighCommandLane>; hiddenLanes: Record<string, number> } | undefined
 
+/** The mirror writes under way (publish), until each lands or fails: the copy of a settled switch waits for them too (startCopy). */
+const publishing = new Set<Promise<void>>()
+
+/** Writes the mirror (writeMirror), and notes the write in `publishing` while it is under way. */
+function publish($: EngineInterface): Promise<void> {
+  const run = writeMirror($)
+  publishing.add(run)
+  const done = () => { publishing.delete(run) }
+  void run.then(done, done)
+  return run
+}
+
 /**
  * Writes the current inbox to `$.state`, each value whole: the main view, and the lanes when they changed. Each write
  * holds the data of the moment it leaves, so the last one wins with current data. A write that answers after a newer
  * one may have landed last, so it writes the data again.
  */
-async function publish($: EngineInterface): Promise<void> {
+async function writeMirror($: EngineInterface): Promise<void> {
   if (!isAdopted || changes === mirrored) return
   for (;;) {
     mirrored = changes
@@ -461,6 +481,155 @@ function syncStatus($: EngineInterface, event: string, isForced = false, withLan
   } catch (error) {
     diagnose($, `high-command: ${event}: could not update the status line: ${causeOf(error)}`)
   }
+}
+
+/**
+ * Takes the switch that session.end noted when no classic.SessionStart reports it, at the first hook after
+ * `$.session.id()` stops answering the session that ended. Until then the switch is still under way, and nothing
+ * changes. Then, once: a clear starts an empty inbox; a resume takes back the inbox that this process kept for the
+ * session, else starts an empty one. Here a branch cannot be told from a resume of another process's conversation, so
+ * it starts empty too, and shows nothing of another conversation. Without the guard, a branch never settles here:
+ * `$.session.id()` answers the parent until classic.SessionStart has run. `write` says when the copy of the inbox goes
+ * to `$.state` (CopyWrite, startCopy).
+ */
+async function settle($: EngineInterface, event: string, withLanes: boolean, write: CopyWrite = 'await'): Promise<void> {
+  const waiting = pending
+  if (waiting === undefined) return
+  let id: string
+  try {
+    id = await $.session.id()
+  } catch (error) {
+    diagnose($, `high-command: ${event}: could not read the session id: ${causeOf(error)}`)
+    return
+  }
+  if (pending !== waiting || id === waiting.ended) return
+  let now: number | undefined
+  try { now = await $.clock.now() } catch (error) { diagnose($, `high-command: ${event}: could not set capture window: ${causeOf(error)}`) }
+  // Another hook, classic.SessionStart, or a newer session.end took the switch meanwhile.
+  if (pending !== waiting) return
+  pending = undefined
+  settled = id
+  lastEnded = undefined
+  laneMirror = undefined
+  const known = waiting.reason === 'resume' ? inboxes.get(id) : undefined
+  current = id
+  const inbox = keep(id, known !== undefined ? startOver(known) : emptyInbox())
+  if (now !== undefined) {
+    if (known === undefined) edit(inbox, { capture: { at: now, reset: true } })
+    else ensureCapture(inbox, now)
+  }
+  syncStatus($, event, true, withLanes)
+  const copy = noteCopy()
+  if (write === 'timer') $.clock.after(0, () => { void startCopy($, copy, event) })
+  else if (write === 'start') void startCopy($, copy, event)
+  else await startCopy($, copy, event)
+}
+
+/**
+ * When a settle writes its copy of the inbox to `$.state` (startCopy): `await`, before the settle resolves; `timer`, in
+ * a timer at 0 ms, as a drawing may not write `$.state`; `start`, at once, while the caller waits for it (settleFirst).
+ */
+type CopyWrite = 'await' | 'timer' | 'start'
+
+/** The copy of the inbox that a settle writes to `$.state`: its write once begun (startCopy). */
+type SettleCopy = { written?: Promise<void> }
+
+/**
+ * The copy that the last settle writes, from the settle until that write has landed or failed (noteCopy). A slash
+ * command or a /config change waits for it (settleFirst), and writes it at once when a drawing left it to its timer.
+ */
+let settleCopy: SettleCopy | undefined
+
+/** Notes a new copy of a settle in `settleCopy`, not begun yet. */
+function noteCopy(): SettleCopy {
+  const copy: SettleCopy = {}
+  settleCopy = copy
+  return copy
+}
+
+/**
+ * Writes `copy` once, and resolves once that write has landed or failed: whoever starts it first writes it with its own
+ * `$`, the timer of a drawing or a hook, and each later call gets the same write. The write is a mirror write under
+ * `event`, then a wait for every mirror write under way (publishing): a write that another hook began after the settle
+ * holds its data, and may not have landed yet. Then the note goes.
+ */
+function startCopy($: EngineInterface, copy: SettleCopy, event: string): Promise<void> {
+  copy.written ??= (async () => {
+    await mirror($, event)
+    await Promise.allSettled([...publishing])
+    if (settleCopy === copy) settleCopy = undefined
+  })()
+  return copy.written
+}
+
+/** ensureReady, then settle a switch that no classic.SessionStart reported. Resolves what ensureReady resolves. */
+async function ensureCurrent($: EngineInterface, event: string, withLanes: boolean, write: CopyWrite = 'await'): Promise<boolean> {
+  if (!(await ensureReady($, event))) return false
+  if (pending !== undefined) await settle($, event, withLanes, write)
+  return true
+}
+
+/**
+ * Settles a pending switch before a slash command or a /config change goes on (settle), then waits until the copy of
+ * the inbox that a settle writes has landed (settleCopy), LIMITS.settleWaitMs at most. Either can reload the mod, as
+ * /reload-plugins and a change of an option do: the reload empties module memory, and Claude Code reset `$.state` at
+ * the switch, so the copy must be in `$.state` first. A copy that a drawing left to its timer is written here at once.
+ * With no switch pending and no copy under way, it calls nothing and waits for nothing.
+ */
+async function settleFirst($: EngineInterface, event: string, withLanes: boolean): Promise<void> {
+  if (pending !== undefined) await ensureCurrent($, event, withLanes, 'start')
+  const copy = settleCopy
+  if (copy === undefined) return
+  let passed = () => {}
+  const deadline = new Promise<void>(resolve => { passed = resolve })
+  const timer = $.clock.after(LIMITS.settleWaitMs, () => passed())
+  try {
+    await Promise.race([startCopy($, copy, event), deadline])
+  } finally {
+    timer.cancel()
+  }
+}
+
+/** The timers of the last switch that session.end noted (watch). */
+let watcher: Timer | undefined
+
+/**
+ * Settles the switch that session.end noted without waiting for another hook: on a surface with no band and with the
+ * pane closed, none may come before a reload of the mod, which would find `$.state` reset and the inbox gone. It reads
+ * `$.session.id()` (ensureCurrent) once at 0 ms, then every LIMITS.switchReadMs, one read at a time. It stops once the
+ * switch settled, by these timers, another hook, or classic.SessionStart, and after LIMITS.switchReads periods. A newer
+ * switch stops it.
+ */
+function watch($: EngineInterface, withLanes: boolean): void {
+  watcher?.cancel()
+  const waiting = pending
+  if (waiting === undefined) return
+  const timers: Timer[] = []
+  const stop = () => { for (const timer of timers) timer.cancel() }
+  let periods = 0
+  let isReading = false
+  const readId = () => {
+    if (pending !== waiting) {
+      stop()
+      return
+    }
+    if (isReading) return
+    isReading = true
+    void ensureCurrent($, 'session.end', withLanes).finally(() => {
+      isReading = false
+      if (pending !== waiting) stop()
+    })
+  }
+  timers.push($.clock.after(0, readId))
+  timers.push($.clock.every(LIMITS.switchReadMs, () => {
+    periods += 1
+    if (periods > LIMITS.switchReads) {
+      stop()
+      return
+    }
+    readId()
+  }))
+  watcher = { cancel: stop }
 }
 
 /** The entries of the main inbox or of a lane, and the roster built from them, as `/highcommand` and the pane read them. */
@@ -581,10 +750,12 @@ async function openFromCommand($: EngineInterface): Promise<CommandRunResult> {
 /**
  * Runs a button's work; a failure becomes a toast that names the action. The press counts as the person's
  * own input only while its onPress work runs, so each handler returns this promise: a `$.ui.open` after
- * awaits is then asked, and the pane is placed at any width.
+ * awaits is then asked, and the pane is placed at any width. A switch that no classic.SessionStart reported
+ * settles first, so a press on a drawing of the conversation that ended does nothing (pressed).
  */
-function press($: EngineInterface, action: string, work: () => Promise<unknown>): Promise<void> {
-  return work().then(() => undefined, (error: unknown) => $.ui.toast(`ui.press: ${action}: ${causeOf(error)}`))
+function press($: EngineInterface, action: string, withLanes: boolean, work: () => Promise<unknown>): Promise<void> {
+  const run = pending === undefined ? work() : settle($, 'ui.press', withLanes).then(work)
+  return run.then(() => undefined, (error: unknown) => $.ui.toast(`ui.press: ${action}: ${causeOf(error)}`))
 }
 
 /**
@@ -661,7 +832,7 @@ function paneActions($: EngineInterface, withLanes: boolean, drawn: Drawn, laneI
    * Runs `change` on the drawn inbox, then refreshes the status line and writes the mirror (afterPress); nothing once
    * the inbox changed. `change` answers the key that the focus ring moves to, if any.
    */
-  const act = (action: string, kind: PressKind, change: (inbox: Inbox) => string | undefined | void) => press($, action, async () => {
+  const act = (action: string, kind: PressKind, change: (inbox: Inbox) => string | undefined | void) => press($, action, withLanes, async () => {
     const inbox = pressed(drawn)
     if (inbox === undefined) return
     const key = change(inbox)
@@ -723,12 +894,12 @@ function paneActions($: EngineInterface, withLanes: boolean, drawn: Drawn, laneI
 function bandActions($: EngineInterface, withLanes: boolean, drawn: Drawn): BandActions {
   return {
     open: () =>
-      press($, 'the pane did not open', async () => {
+      press($, 'the pane did not open', withLanes, async () => {
         const problem = await openPane($)
         if (problem !== undefined) $.ui.toast(`ui.press: ${problem}`)
       }),
     readAll: () =>
-      press($, 'read all', async () => {
+      press($, 'read all', withLanes, async () => {
         const inbox = pressed(drawn)
         if (inbox === undefined) return
         if (withLanes) changeLanes(inbox, (lane, id) => ({ ...lane, readThrough: markRead(lane.readThrough, seenOf(lane.entries, drawn.lanes.get(id) ?? 0)) }))
@@ -736,7 +907,7 @@ function bandActions($: EngineInterface, withLanes: boolean, drawn: Drawn): Band
         await afterPress($, 'marks', undefined, withLanes)
       }),
     hide: () =>
-      press($, 'hide', async () => {
+      press($, 'hide', withLanes, async () => {
         const inbox = pressed(drawn)
         if (inbox === undefined) return
         if (withLanes) setLanes(inbox, inbox.lanes, hideLanes(inbox.hiddenLanes, drawn.lanes))
@@ -756,7 +927,7 @@ export const register: Register = (on, options) => {
     } catch (error) {
       diagnose($, `high-command: session.start: could not register /highcommand: ${causeOf(error)}`)
     }
-    if (!(await ensureReady($, 'session.start'))) return next(e)
+    if (!(await ensureCurrent($, 'session.start', withLanes))) return next(e)
     try { ensureCapture(inboxNow(), await $.clock.now()) } catch (error) { diagnose($, `high-command: session.start: could not set capture window: ${causeOf(error)}`) }
     syncStatus($, 'session.start', true, withLanes)
     await mirror($, 'session.start')
@@ -764,20 +935,26 @@ export const register: Register = (on, options) => {
   })
 
   // At /clear, /resume, and /branch, Claude Code runs session.end, then resets $.state, then runs classic.SessionStart.
-  // The inbox stays in module memory, so the hook only remembers the session that ends: the parent of a branch. Any
-  // other reason is an exit with no switch after it, so the hook does nothing then.
+  // The inbox stays in module memory, so the hook only remembers the session that ends: the parent of a branch. It
+  // also notes the switch for settle, in case no classic.SessionStart comes, and starts the timers that settle it once
+  // the id changed (watch). Any other reason is an exit with no switch after it, so the hook does nothing then.
   on('session.end', async ($, e, next) => {
     if (e.reason !== 'clear' && e.reason !== 'resume') return next(e)
+    pending = { reason: e.reason, ended: e.sessionId }
+    settled = undefined
     await ensureReady($, 'session.end')
     lastEnded = e.sessionId
     laneMirror = undefined
+    watch($, withLanes)
     return next(e)
   })
 
-  // Any source sets the current session from `e.session_id`: here `$.session.id()` still answers the session that
-  // ended. A branch copies its parent's inbox (the session that ended last), a resume takes its own inbox back when
+  // Any source sets the current session from `e.session_id`: at a branch, `$.session.id()` still answers the parent
+  // here. A branch copies its parent's inbox (the session that ended last), a resume takes its own inbox back when
   // this process kept it, and a clear, or a resume or branch with nothing kept, starts a new empty inbox. Then the hook
-  // writes the mirror again, so the last mirror write after the switch holds the new conversation's inbox.
+  // writes the mirror again, so the last mirror write after the switch holds the new conversation's inbox. When settle
+  // already moved to this conversation, the hook changes no inbox: settle gave the same one, and what was recorded
+  // since then stays.
   on('classic.SessionStart', async ($, e, next) => {
     const isSwitch = e.source === 'fork' || e.source === 'resume' || e.source === 'clear'
     if (!(await ensureReady($, 'classic.SessionStart'))) {
@@ -787,6 +964,17 @@ export const register: Register = (on, options) => {
       isAdopted = true
     }
     const id = e.session_id
+    if (isSwitch) {
+      const isSettled = settled === id
+      pending = undefined
+      settled = undefined
+      if (isSettled) {
+        lastEnded = undefined
+        syncStatus($, 'classic.SessionStart', false, withLanes)
+        await mirror($, 'classic.SessionStart')
+        return next(e)
+      }
+    }
     const parent = e.source === 'fork' && lastEnded !== undefined ? inboxes.get(lastEnded) : undefined
     const known = e.source === 'resume' ? inboxes.get(id) : undefined
     if (isSwitch) lastEnded = undefined
@@ -814,7 +1002,7 @@ export const register: Register = (on, options) => {
 
   on('session.receive', async ($, e, next) => {
     if (!MESSAGE_ORIGINS.has(e.origin.kind)) return next(e)
-    if (!(await ensureReady($, 'session.receive'))) return next(e)
+    if (!(await ensureCurrent($, 'session.receive', withLanes))) return next(e)
     // The message belongs to the conversation that is current as it arrives, even when a switch comes before it records.
     const session = current ?? ''
     let at: number | undefined
@@ -841,7 +1029,7 @@ export const register: Register = (on, options) => {
   // the list is read before the mods beneath run, while an agent that ends meanwhile is still listed.
   on('prompt.submit', { origin: { kind: 'peer' } }, async ($, e, next) => {
     if (!isAgentMessage(e.text)) return next(e)
-    if (!(await ensureReady($, 'prompt.submit'))) return next(e)
+    if (!(await ensureCurrent($, 'prompt.submit', withLanes))) return next(e)
     const session = current ?? ''
     let at: number | undefined
     try { at = await $.clock.now(); ensureCapture(inboxOf(session), at) } catch (error) { diagnose($, `high-command: prompt.submit: could not observe delivery time: ${causeOf(error)}`) }
@@ -873,7 +1061,7 @@ export const register: Register = (on, options) => {
 
   on('session.send', async ($, e, next) => {
     if (e.origin.kind !== 'model') return next(e)
-    if (!(await ensureReady($, 'session.send'))) return next(e)
+    if (!(await ensureCurrent($, 'session.send', withLanes))) return next(e)
     const session = current ?? ''
     let at: number | undefined
     try { at = await $.clock.now(); ensureCapture(inboxOf(session), at) } catch (error) { diagnose($, `high-command: session.send: could not observe send time: ${causeOf(error)}`) }
@@ -891,7 +1079,7 @@ export const register: Register = (on, options) => {
   })
 
   on('tool.call', { tool: 'ListAgents' }, async ($, e, next) => {
-    if (!(await ensureReady($, 'tool.call ListAgents'))) return next(e)
+    if (!(await ensureCurrent($, 'tool.call ListAgents', withLanes))) return next(e)
     const session = current ?? ''
     const out = await next(e)
     const result: unknown = out.isError === true ? undefined : out.result
@@ -913,15 +1101,17 @@ export const register: Register = (on, options) => {
 
   on('agent.spawn', async ($, e, next) => {
     const result = await next(e)
-    if (!(await ensureReady($, 'agent.spawn'))) return result
+    if (!(await ensureCurrent($, 'agent.spawn', withLanes))) return result
     await refreshAgents($, 'agent.spawn')
     await mirror($, 'agent.spawn')
     return result
   })
 
+  // A main turn records nothing, but the first one after a switch that no classic.SessionStart reported settles it.
   on('turn.complete', async ($, e, next) => {
     const result = await next(e)
-    if (e.agentId !== undefined && await ensureReady($, 'turn.complete')) {
+    if (e.agentId === undefined && pending === undefined) return result
+    if (await ensureCurrent($, 'turn.complete', withLanes) && e.agentId !== undefined) {
       await refreshAgents($, 'turn.complete')
       try {
         const at = await $.clock.now()
@@ -940,9 +1130,24 @@ export const register: Register = (on, options) => {
     return result
   })
 
+  // Every slash command, /highcommand included, settles a pending switch first and waits for the copy of the inbox
+  // that a settle writes, also one that a drawing left to its timer, then runs as typed: a command can reload the mod,
+  // as /reload-plugins does (settleFirst). With no switch pending and no copy under way, the hook calls nothing.
+  on('command.run', async ($, e, next) => {
+    await settleFirst($, 'command.run', withLanes)
+    return next(e)
+  })
+
+  // Every /config change does the same first: a change of an option reloads the mod (settleFirst). The change then
+  // goes on as it came: the hook never refuses it and never changes its value.
+  on('config.set', async ($, e, next) => {
+    await settleFirst($, 'config.set', withLanes)
+    return next(e)
+  })
+
   on('command.run', { command: 'highcommand' }, async ($, e) => {
     const argument = e.args.trim()
-    if (!(await ensureReady($, 'command.run'))) return { text: 'command.run: could not take back the inbox from $.state' }
+    if (!(await ensureCurrent($, 'command.run', withLanes))) return { text: 'command.run: could not take back the inbox from $.state' }
     if (argument === 'open') return openFromCommand($)
     if (argument !== '') return { text: USAGE }
     try {
@@ -962,7 +1167,7 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'Pane', requestId: 'high-command' }, async ($, e) => {
     const ui = $.ui.resolve(e)
     try {
-      if (!(await ensureReady($, 'ui.render'))) throw new Error('could not take back the inbox from $.state')
+      if (!(await ensureCurrent($, 'ui.render', withLanes, 'timer'))) throw new Error('could not take back the inbox from $.state')
       await read($, view)
       const inbox = inboxNow()
       const chosen = inbox.selectedLane
@@ -987,7 +1192,7 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
     const below = await next(e)
-    if (!(await ensureReady($, 'ui.render'))) return below
+    if (!(await ensureCurrent($, 'ui.render', withLanes, 'timer'))) return below
     await read($, view)
     const inbox = inboxNow()
     const list = inbox.entries
