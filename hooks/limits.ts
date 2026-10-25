@@ -20,6 +20,12 @@ export const LIMITS = {
    * the one used least recently drops first.
    */
   snapshots: 10,
+  /** Milliseconds between two reads of the session id after a switch, after the read at 0 ms, until the switch settles (watch). */
+  switchReadMs: 500,
+  /** Periods of switchReadMs after a switch in which the session id is read at most: 600 of 500 ms take 5 minutes. */
+  switchReads: 600,
+  /** Milliseconds that a slash command or a /config change waits at most for the copy that a settled switch writes (settleFirst). */
+  settleWaitMs: 2000,
   /** Characters of a body kept; the transcript keeps the rest. */
   bodyChars: 2000,
   /** Characters of a summary line. */
