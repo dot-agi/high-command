@@ -1,4 +1,4 @@
-import type { HighCommandState, HighCommandTrust } from '../types'
+import type { HighCommandCapture, HighCommandState, HighCommandTrust } from '../types'
 import { LIMITS } from './limits'
 
 const CONTROL = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F]/g
@@ -341,9 +341,23 @@ export function peerKeys(peers: readonly string[]): Map<string, string> {
   return keys
 }
 
-/** A conversation-local marker, preserved across module reloads. */
-export function captureLabel(capture: { at: number; reset: boolean }, now: number): string {
-  return `Capture window: ${clockLabel(capture.at, now)} · current conversation only. ${capture.reset ? 'Previous High Command history was not restored.' : 'Earlier history is not included.'}`
+/** How a branch's capture window names the messages it took from the parent: `Branched 13:04 · 12 messages from the parent conversation`. */
+export function branchLabel(branch: { at: number; messages: number }, now: number): string {
+  return `Branched ${clockLabel(branch.at, now)} · ${count(branch.messages, 'message')} from the parent conversation`
+}
+
+/**
+ * The conversations a branch's capture window covers: its parent, and one earlier conversation for each /branch step
+ * before that, as in `this conversation, the one it branched from, and 1 earlier conversation`.
+ */
+function branchScope(depth: number): string {
+  return depth <= 1 ? 'this conversation and the one it branched from' : `this conversation, the one it branched from, and ${count(depth - 1, 'earlier conversation')}`
+}
+
+/** A conversation-local marker, preserved across module reloads; a branch's covers the conversations it branched from too. */
+export function captureLabel(capture: HighCommandCapture, now: number): string {
+  const scope = capture.branch === undefined ? 'current conversation only.' : `${branchScope(capture.branch.depth)}. ${branchLabel(capture.branch, now)}.`
+  return `Capture window: ${clockLabel(capture.at, now)} · ${scope} ${capture.reset ? 'Previous High Command history was not restored.' : 'Earlier history is not included.'}`
 }
 
 /** Fixed-width identity pages never separate the halves of a surrogate pair. */

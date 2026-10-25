@@ -4,7 +4,7 @@
   <img src="https://img.shields.io/badge/Claude_Code-2.1.288%2B-D97757" alt="Claude Code 2.1.288+">
   <img src="https://img.shields.io/badge/type-mod-555555" alt="mod">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-555555" alt="License: MIT"></a>
-  <img src="https://img.shields.io/badge/version-1.2.2-555555" alt="Version: 1.2.2">
+  <img src="https://img.shields.io/badge/version-1.3.0-555555" alt="Version: 1.3.0">
 </p>
 
 <p align="center"><strong>One inbox for agent-team teammates, named subagents, and other Claude Code sessions.</strong></p>
@@ -159,7 +159,7 @@ Set options in `/config`, or under `pluginConfigs["high-command@high-command"].o
 | --- | --- | --- |
 | `agentLanesInBand` | `false` | Adds the unread count of all agent lanes to the band and the status line, as in `high-command: 3 unread (retained) · 2 unread in agent lanes`. **Read all** in the band then also marks every agent lane read. **Hide** then also ends when a newer message arrives in an agent lane. **Open** still shows the main inbox. |
 
-A change takes effect at once: Claude Code reloads the mod with the new values.
+A change takes effect at once: Claude Code reloads the mod with the new values. The reload keeps the current inbox, but it drops the inboxes that the mod kept for `/resume` (see **Reloads** in [Known limits](#known-limits)).
 
 ## How it compares
 
@@ -171,7 +171,7 @@ Claude Code and other mods also show peer messages. Each row says what the tool 
 | Built-in `/list-agents` (`/peers`) ([cross-session messaging](https://code.claude.com/docs/en/cross-session-messaging)) | Lists subagents, teammates, and local and remote sessions, with offline status. | The messages of each peer. When Claude runs ListAgents, the reported state shows on that peer's roster row. |
 | Built-in agent panel ([agent teams](https://code.claude.com/docs/en/agent-teams)) | Lists teammates and subagents. Enter opens one teammate's transcript. | One inbox across teammates, named subagents, and other sessions. |
 | [session-orchestra](https://github.com/atarazevich/session-orchestra) | A read-only mod with session cards (working or idle state, model, effort, context bar), subagent cards, and a message list with a full-message view and a copy button. It reads transcripts and runs in a terminal. | Unread counts, sender labels, suspicious marks, and the reported result of each plain-text send. High Command reads no files, and its pane also draws in the desktop app, the VS Code panel, and the mobile app. |
-| [claude-crosstalk](https://github.com/kbrdn1/claude-crosstalk) | A mod with a per-peer inbox for cross-session messages, unread counts, a status line, and a reply field that sends through SendMessage. It keeps history across restarts and `--resume`, rebuilt from the session journal. | Teammates and named subagents in the same inbox, sender labels, suspicious marks, and the reported result of each plain-text send. High Command sends nothing and keeps no history past the conversation. |
+| [claude-crosstalk](https://github.com/kbrdn1/claude-crosstalk) | A mod with a per-peer inbox for cross-session messages, unread counts, a status line, and a reply field that sends through SendMessage. It keeps history across restarts and `--resume`, rebuilt from the session journal. | Teammates and named subagents in the same inbox, sender labels, suspicious marks, and the reported result of each plain-text send. High Command sends nothing and keeps no history past the Claude Code process. |
 
 ## Known limits
 
@@ -183,7 +183,7 @@ Claude Code and other mods also show peer messages. Each row says what the tool 
 
 ### What it does not catch
 
-- **Earlier history**: messages from before this session, or from before `/clear`, `/resume`, or `/branch`.
+- **Earlier history**: messages from before this Claude Code process started, or from before `/clear`. `/branch` keeps the parent conversation's inbox. `/resume` brings an inbox back only for one of the last 10 conversations that ended in this process since the mod last loaded. Any other `/resume` starts empty (see **Branches and resumes** below).
 - **Some sends**: structured sends such as `shutdown_request`, and sends by other mods or by agents that a mod started.
 - **Split-pane traffic**: messages between teammates that run in their own tmux or iTerm2 panes.
 - **Proof of reading**: a queued send does not show that the peer read it, and a peer state can be out of date.
@@ -199,7 +199,9 @@ The list below holds the limits you can hit in daily use. [docs/usage.md](docs/u
 - **Peer states**: a peer's roster row shows only states from teammates' notices and ListAgents results, never the local agent status. A state is the last one reported, with its time, so it does not prove that the peer is in that state now. When two rows of one ListAgents result have the same name, High Command cannot tell whose state is whose. When the result lists its rows as data, High Command takes no state for that name, so a state recorded earlier, such as `offline`, stays on that peer's row. When the result holds only the printed listing, that name gets the state of the last such row that has one.
 - **Send results**: a send shows the recipient and text that High Command observed, and the result reported back to High Command. **Show send details** shows what Claude Code itself received, which another mod may have changed, and whether Claude Code queued the message. When a mod answers the send itself, Send details cannot show this. When a mod sends the message more than once, Send details covers only one of those sends. A refused send shows the first 120 characters of the reason, on one line, in its reported send result. **Send details** keeps up to 2,000 characters of the reason, with its line breaks, and says when it was cut. A queued message is not proof that the peer read it.
 - **Structured sends**: Claude Code passes only plain-text SendMessage messages to High Command. A SendMessage whose message is a `shutdown_request`, `shutdown_response`, or `plan_approval_response` object does not reach it. Neither its attempt nor its result appears in the main inbox, an agent lane, or `/highcommand`. Check the transcript for these sends.
-- **No earlier history**: High Command starts empty in each new session and conversation. `/clear`, `/resume`, and `/branch` empty it again, so a resumed conversation shows none of its earlier messages. The pane and `/highcommand` say when the capture window began. After these commands, they also say that earlier history was not restored.
+- **Branches and resumes**: High Command starts empty in each new Claude Code process. `/branch` keeps the inbox as it stood at the branch point: the messages of the main inbox and of each agent lane, the peers and their reply addresses, the read marks, and **Hide**. New messages go on top. A message you had not read stays unread, with its sender label and any `suspicious` mark, so the band and the status line count it again. The pane says when you branched and how many messages came from the parent conversation, and `/highcommand` says the same. That count covers the main inbox and the agent lanes. A branch of a branch also keeps the messages of each conversation before it, and `/highcommand` counts those conversations. `/resume` of a conversation that ended in the same process brings back its inbox as it was when it ended. The process keeps the inboxes of the 10 conversations that ended last, so a resume of an older one starts empty. `/resume` never keeps the inbox of the conversation you leave. A `/resume` of any other conversation, such as one from an earlier process in the `/resume` list, starts empty, with no agent lanes, as after `/clear`. The open thread and the roster page start over, in the main inbox and in each agent lane, and so does the lane you picked.
+- **Reloads**: a reload of the mod keeps the current inbox, but it drops every inbox kept for `/resume`. A `/resume` after the reload then starts empty, also for a conversation that ended in this process. Claude Code reloads the mod when you change one of its [options](#options), and when it loads new code of the mod, as at `/reload-plugins` after an update. `/branch` still keeps the inbox after a reload.
+- **No earlier history**: `/clear` starts an empty inbox. High Command keeps the inboxes in the memory of the Claude Code process only, never on disk. So `claude --resume` in a new process, `--fork-session`, and a `/fork` copy, which runs in a process of its own, start empty, even when the conversation that Claude reads holds earlier messages. A conversation that you move to the background, with `/background`, `/bg`, or the left arrow (`←`) on an empty prompt, starts empty too: Claude Code continues it in a new process, as after `claude --resume`. The pane and `/highcommand` say when the capture window began. After `/clear`, and in each of these cases, they also say that earlier history was not restored.
 - **Display only**: High Command changes nothing that Claude reads. Its inbox leaves out idle notices with no content, but Claude still reads them, so the inbox saves no model turns or tokens.
 
 </details>
@@ -208,19 +210,20 @@ The list below holds the limits you can hit in daily use. [docs/usage.md](docs/u
 
 - High Command makes no network, file, process, or model call of its own, and it keeps nothing on disk. It reads no credential, token, settings file, environment variable, or other file. The `suspicious` patterns in `hooks/text.ts` name credential files, such as `.aws/credentials`, only to mark a message that asks an agent to read one.
 - Besides the events in the table below, it reads the local agent list (each agent's ID, name, status, and the mod that started it) to file sends, label subagent messages, and show each local agent's status. It reads which surfaces show the session, so `/highcommand open` can say when no pane can draw. It also reads the clock and its own session state.
-- It keeps up to 200 messages in the main inbox and in each agent lane, and the states of up to 100 peers, in session memory. A message, a refusal reason, and the text in **Send details** keep at most 2,000 characters each, with control characters removed. `/clear`, `/resume`, `/branch`, and the end of the session drop them.
+- It keeps up to 200 messages in the main inbox and in each agent lane, and the states of up to 100 peers, in the memory of the Claude Code process: one inbox for each conversation, for the current one and the 10 used last before it. A message, a refusal reason, and the text in **Send details** keep at most 2,000 characters each, with control characters removed. It also writes a copy of the current inbox to its own `$.state` values, which Claude Code keeps in this process only, so that a reload of the mod keeps the inbox. `/branch` copies the inbox to the branch. `/clear` starts an empty inbox. A reload of the mod drops every inbox but the current one, and the end of the process drops all of them.
 - A pane that you open in the desktop app, the VS Code panel, or the mobile app is drawn there, as the transcript is.
 - `/highcommand` output reaches Claude as command output. It holds counts, times, states, and peer and agent names, never message text. Names show as code, so a name cannot add a link or formatting.
 - High Command never orders, highlights, or counts a message by a priority or urgency that its sender claims.
 
 ### What High Command hooks
 
-The first eight hooks below pass their event on with `next(e)` and return the result unchanged. The last two answer `/highcommand` and draw High Command's own views.
+The first nine hooks below pass their event on with `next(e)` and return the result unchanged. The last two answer `/highcommand` and draw High Command's own views.
 
 | Event | What the hook does |
 | --- | --- |
 | `session.start` | Registers `/highcommand`, starts the capture window, and sets the status line. |
-| `classic.SessionStart`, on `/clear`, `/resume`, and `/branch` | Starts a new capture window and sets the status line again. It adds no context, instructions, or settings. |
+| `session.end` | On `/clear`, `/resume`, and `/branch`, notes the conversation that ends: the parent of a branch. The inboxes stay in memory. At an exit it does nothing. |
+| `classic.SessionStart` | Sets the conversation that High Command shows. On `/branch`, copies the parent conversation's inbox to the branch. On `/resume`, takes back the inbox of the resumed conversation when this process kept one. On `/clear`, and otherwise after a switch, starts an empty inbox. Then writes the copy of the inbox to `$.state` and sets the status line again. It adds no context, instructions, or settings. |
 | `session.receive` | For a message from a peer, records the text that Claude Code queues for Claude. |
 | `prompt.submit`, for peer prompts | Records a named subagent's `<agent-message>` prompt, and reads the local agent list for its sender label. It submits no prompt. |
 | `session.send`, for Claude's sends | Records each plain-text SendMessage attempt and its reported result. |
@@ -241,7 +244,7 @@ High Command has no hook on a permission check, so it never changes a permission
 - **`claude plugin test` says hooks modules are turned off**: mods cannot load. `turned off here` means a setting or your organization's policy blocks them. `turned off in this process` means installed mods are off: start `claude` once with network access, then run the check again. If the message stays, installed mods are turned off remotely, and no setting on your machine turns them back on.
 - **A peer shows as `unnamed peer`**: the delivery carried no sender name. Start Claude Code with `--debug`. Each such delivery writes `high-command: session.receive: a <kind> delivery named no sender` to the debug log, or the same line with `prompt.submit` for a subagent's message. Please open an issue with your Claude Code version and that line.
 - **No band in VS Code or the mobile app**: these surfaces draw no band. Use `/highcommand open` for the pane, or `/highcommand`.
-- **High Command is empty after `/clear`, `/resume`, or `/branch`**: High Command holds the current conversation only.
+- **High Command is empty after `/clear` or `/resume`**: `/clear` starts an empty inbox. `/resume` brings an inbox back only for one of the last 10 conversations that ended in the same Claude Code process, and only when the mod did not reload after that conversation ended. A change to an [option](#options) reloads the mod, and so does `/reload-plugins` when it loads new code of the mod. High Command keeps nothing on disk, so `claude --resume` in a new process starts empty, and so does a conversation that `/background`, `/bg`, or `←` on an empty prompt moves to a new process.
 - **`claude -p "/highcommand"` shows no messages**: a `-p` run reports only the messages of that run. Use `/highcommand` in a long-running session or an SDK host.
 - **A `high-command:` line in the transcript**: it names the event and the cause of a failure. The transcript shows each distinct line once until the mod loads again, and repeats go to the debug log only. Errors that `/highcommand` prints show every time. Start Claude Code with `--debug` to see every line.
 - **A debug line names high-command after you decline a message**: Claude Code reports the declined delivery under each mod that passed it on. High Command records nothing for that message.

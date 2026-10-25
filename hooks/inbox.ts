@@ -103,7 +103,12 @@ export function applyReports(peers: Readonly<Peers>, reports: readonly PeerRepor
       ...(address !== undefined && isCurrent(known?.address) ? { address: { value: address, at, order: ++order } } : {}),
     })
   }
-  const all = [...next]
+  return keepPeers(next)
+}
+
+/** The LIMITS.peers peers reported most recently. */
+function keepPeers(peers: ReadonlyMap<string, HighCommandPeer>): Peers {
+  const all = [...peers]
   return Object.fromEntries(all.length <= LIMITS.peers ? all : all.sort(([, a], [, b]) => b.seenAt - a.seenAt).slice(0, LIMITS.peers))
 }
 
@@ -201,10 +206,10 @@ export function lanesUnread(lanes: Readonly<Record<string, HighCommandLane>>): n
   return Object.values(lanes).reduce((sum, lane) => sum + unreadTotal(rosterOf(lane.entries, {}, lane.readThrough)), 0)
 }
 
-/** Per lane, the newest seq a press of Hide saw in `lanes`. A mark never moves back. */
-export function hideLanes(hidden: Readonly<Record<string, number>>, lanes: Readonly<Record<string, HighCommandLane>>): Record<string, number> {
+/** Per lane, the newest seq that a press of Hide saw, `seen`. A mark never moves back. */
+export function hideLanes(hidden: Readonly<Record<string, number>>, seen: ReadonlyMap<string, number>): Record<string, number> {
   const next = new Map(Object.entries(hidden))
-  for (const [id, lane] of Object.entries(lanes)) next.set(id, Math.max(next.get(id) ?? 0, newestSeq(lane.entries)))
+  for (const [id, seq] of seen) next.set(id, Math.max(next.get(id) ?? 0, seq))
   return Object.fromEntries(next)
 }
 
@@ -219,22 +224,6 @@ export function newestUnreadableSeq(list: readonly HighCommandEntry[]): number {
  */
 export function lanesSeen(lanes: Readonly<Record<string, HighCommandLane>>, hidden: Readonly<Record<string, number>>): boolean {
   return Object.entries(lanes).every(([id, lane]) => Math.max(lane.inboundThrough ?? 0, newestUnreadableSeq(lane.entries)) <= markOf(hidden, id))
-}
-
-/**
- * The versions of `entries` and `readThrough` that a status line count comes from, and the version of `lanes` when
- * the line also counts agent lanes.
- */
-type StatusView = { entries: number; marks: number; lanes?: number }
-
-/**
- * Whether a status refresh may pin its count: its view is older in no value than the view behind the line and
- * newer in one, the line has no view yet, or the line counts agent lanes and the refresh does not, or the reverse.
- */
-export function isNewerView(view: StatusView, shown: StatusView | undefined): boolean {
-  if (shown === undefined || (view.lanes === undefined) !== (shown.lanes === undefined)) return true
-  const isOlder = view.entries < shown.entries || view.marks < shown.marks || (view.lanes ?? 0) < (shown.lanes ?? 0)
-  return !isOlder && (view.entries > shown.entries || view.marks > shown.marks || (view.lanes ?? 0) > (shown.lanes ?? 0))
 }
 
 /**

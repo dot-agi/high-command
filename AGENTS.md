@@ -45,14 +45,14 @@ claude plugin list --json | jq -r '.[] | select(.id == "high-command@high-comman
 
 | Path | Role |
 | --- | --- |
-| `hooks/register.tsx` | The hooks module: every hook, the `$.state` atoms, diagnostics, and button handlers. The only file that uses `$`. |
+| `hooks/register.tsx` | The hooks module: every hook, the inbox of each conversation in module memory (the source of truth), the copy of the current inbox it writes to `$.state` for drawing and reloads, diagnostics, and button handlers. The only file that uses `$`. |
 | `hooks/envelope.ts` | Parses a delivery into entries and peer reports. |
 | `hooks/listing.ts` | Reads peer states from a ListAgents listing. |
 | `hooks/inbox.ts` | Pure state transforms: append, read marks, roster, threads, recipients. |
 | `hooks/summary.ts` | The `/highcommand` text. |
 | `hooks/views.tsx` | The pane and band trees, and the check that keeps the band within the engine's drawing bounds. |
 | `hooks/text.ts`, `hooks/limits.ts` | Text helpers and bounds. |
-| `types/index.d.ts` | The `PluginState` contract. |
+| `types/index.d.ts` | The entry, peer, and lane types, and the `PluginState` contract of the `$.state` copy. |
 | `tests/` | Local test files (`*.test.ts`) for the test kit. Git does not track them. |
 
 ## Commands
