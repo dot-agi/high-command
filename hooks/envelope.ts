@@ -217,7 +217,7 @@ export function agentSenderOf(text: string, origin: SessionReceiveOrigin): strin
  */
 export function spawnerOf(agents: readonly AgentInfo[], sender: string): string | undefined {
   const matches = agents.filter(agent => agent.id === sender || peerKey(agent.name ?? '') === sender)
-  return matches.length > 0 && matches.every(agent => agent.spawnedBy !== undefined) ? matches[0]!.spawnedBy : undefined
+  return matches.length > 0 && matches.every(match => match.spawnedBy !== undefined) ? matches[0]!.spawnedBy : undefined
 }
 
 /**

@@ -1,11 +1,10 @@
 import { atom, read } from 'claude-code'
-import type { AgentInfo, CommandRunResult, EngineInterface, Register, SessionReceiveOrigin, SessionSendResult, Timer, TraceEntry } from 'claude-code'
+import type { AgentInfo, CommandRunResult, EngineInterface, Register, SessionAppendInput, SessionAppendResult, SessionReceiveOrigin, Timer } from 'claude-code'
 
 import type { HighCommandAgent, HighCommandCapture, HighCommandEntry, HighCommandLane, HighCommandPeer, HighCommandThread, HighCommandView } from '../types'
 import { agentSenderOf, isAgentMessage, parseDelivery, spawnerOf, UNNAMED, type NewEntry, type PeerReport } from './envelope'
 import {
   appendEntries,
-  coreEvidence,
   applyReports,
   fitLanes,
   hideLanes,
@@ -25,7 +24,7 @@ import {
   type RosterRow,
 } from './inbox'
 import { LIMITS } from './limits'
-import { parseListing, parseStructuredListing } from './listing'
+import { isResultListed, listingOf, needsResult, ROW_TOOLS, sendOutcomeOf, SPAWN_TOOL, summariesOf, toolResultsOf, toolUsesOf, type RowCall, type Summary } from './rows'
 import { summaryText } from './summary'
 import { count, sanitize, peerKey, peerKeys, peerLabels, unreadText } from './text'
 import { bandTree, compactBandTree, fitsBounds, laneIdsOf, laneIdsShown, paneTree, rosterPageOf, type BandActions, type PaneActions } from './views'
@@ -700,34 +699,405 @@ async function agentsForLabel($: EngineInterface): Promise<readonly AgentInfo[]>
   }
 }
 
-/** Records the observed send attempt and its result in the inbox of `session`; an attempt to an agent with no name is left out. */
-async function recordSend($: EngineInterface, session: string, to: string, text: string, sent: SessionSendResult, trace: readonly TraceEntry<'session.send'>[], at: number, laneId?: string): Promise<void> {
-  const listed = await $.agent.list()
-  const inbox = inboxes.get(session)
-  if (inbox === undefined) return
-  const lane = laneId === undefined ? undefined : laneOf(inbox, laneId)
-  const peer = recipientOf(to, lane?.peers ?? inbox.peers, listed, lane?.entries ?? inbox.entries)
-  if (peer === undefined) return
-  append(inbox, [{ ...outboundEntry(peer, text, sent), core: coreEvidence(trace) }], at, laneId)
-}
-
-/** Records the peer states a ListAgents listing names in the inbox of `session`, or says in the debug log that no row gave one. */
-async function recordListing($: EngineInterface, session: string, { reports, rowCount }: ReturnType<typeof parseListing>, laneId?: string): Promise<void> {
+/**
+ * Records the peer states a ListAgents listing names in the inbox of `session`, or says in the debug log that no row
+ * gave one. `observedAt` is the time of the call's result row: a state read later keeps it, so a newer notice stays.
+ */
+async function recordListing($: EngineInterface, session: string, { reports, rowCount }: { reports: PeerReport[]; rowCount: number }, laneId?: string, observedAt?: number): Promise<void> {
   reports.forEach(report => { report.source ??= 'formatted listing' })
   if (reports.length > 0) {
-    const at = await $.clock.now()
+    const at = observedAt ?? await $.clock.now()
     const inbox = inboxes.get(session)
     if (inbox !== undefined) saveReports(inbox, reports, at, laneId)
   } else if (rowCount > 0) {
     $.ui.log(
-      `tool.call ListAgents: no listing row gave a peer state (${count(rowCount, 'row')} read); peer states are unchanged`,
+      `session.append (ListAgents): no listing row gave a peer state (${count(rowCount, 'row')} read); peer states are unchanged`,
       { to: 'debug' },
     )
   }
 }
 
+/**
+ * Claude's tool calls reach High Command as the conversation's rows (session.append): the response row holds a call's
+ * input, the result row what the model read. A SendMessage result row says whether the send was queued, so it records
+ * at once. A ListAgents call waits for its structured rows in `$.session.messages()`, which Claude Code stores a moment
+ * after the result row: High Command reads at LIMITS.lookupMs after the row, and after the last read it keeps the text
+ * that the model read. So does a send whose text does not say, and a send whose response row this load did not see,
+ * which waits for its input and reads only from its try of LIMITS.lookupLastFromMs on. The result row's hook waits for
+ * the first read, LIMITS.lookupFirstMs at most. A call's entry and states take the time of its result row, also when
+ * they record after a later read. A call inside a Code Mode script that succeeded gives an empty result row, and the
+ * transcript stores no result for it: its send records with an unknown result, and its listing gives no state.
+ */
+
+/** A result row that waits for what `$.session.messages()` stores for its call: its record, or its input. */
+type WaitingRow = { call: RowCall; after?: string; tries: number; timer?: Timer }
+
+/** The input of each SendMessage and ListAgents call, and its response row, until its result row comes. */
+const rowInputs = new Map<string, { name: string; input: Record<string, unknown>; uuid: string }>()
+/** The tool use ids that reached the inbox, so that no call records twice. */
+const rowsSeen = new Set<string>()
+/** The result rows that wait for their structured record, by tool use id, the oldest first. */
+const waiting = new Map<string, WaitingRow>()
+/** The conversation of each local agent's first row in this module load: its later calls go to that inbox. */
+const agentSessions = new Map<string, string>()
+/** Whether this build answers ranged transcript reads (`after`, `last`); undefined until one answered. */
+let isRanged: boolean | undefined
+/** When agent rows last made High Command read the local agent list. */
+let agentReadAt = -Infinity
+/** The agents that the list did not hold when their row made High Command read it: a later row of one reads nothing. */
+const unlistedReads = new Set<string>()
+
+/** Drops the oldest keys of `store` past `max`. */
+function trimOldest(store: { readonly size: number; keys(): Iterable<string>; delete(key: string): boolean }, max: number): void {
+  for (const oldest of store.keys()) {
+    if (store.size <= max) break
+    store.delete(oldest)
+  }
+}
+
+/** What a row gives High Command: its finished SendMessage and ListAgents calls, and whether to read the local agents. */
+type RowWork = { calls: { id: string; name: string; text: string; isError: boolean }[]; isAgentRead: boolean }
+
+/**
+ * Whether High Command reads the local agent list at a row of this agent: the list showed it neither running nor
+ * idle, or never held it and no row of it read the list yet.
+ */
+function isAgentReadDue(agentId: string): boolean {
+  const known = Object.hasOwn(agents, agentId) ? agents[agentId] : undefined
+  if (known === undefined) return !unlistedReads.has(agentId)
+  return known.status !== 'running' && known.status !== 'idle'
+}
+
+/**
+ * Reads one row before it is kept, without a call on `$`: keeps the input of each SendMessage and ListAgents call of a
+ * response row, and takes the finished calls of a result row. The first row of a local agent in this load also gives
+ * work, with no call, so that afterRow binds the agent to its conversation (rowSession) at once, whatever row it is.
+ * Undefined when the row gives nothing.
+ */
+function rowOf(e: SessionAppendInput): RowWork | undefined {
+  const isFirst = e.agentId !== undefined && !agentSessions.has(e.agentId)
+  let isAgentRead = e.agentId !== undefined && isAgentReadDue(e.agentId)
+  const calls: RowWork['calls'] = []
+  if (e.door === 'response') {
+    for (const use of toolUsesOf(e.message.content)) {
+      if (!ROW_TOOLS.has(use.name)) continue
+      rowInputs.set(use.id, { name: use.name, input: use.input, uuid: e.uuid })
+      trimOldest(rowInputs, LIMITS.rowInputs)
+    }
+  } else if (e.door === 'tool-result') {
+    const tool = e.origin.kind === 'tool' && e.origin.tool !== 'unknown' ? e.origin.tool : undefined
+    for (const block of toolResultsOf(e.message.content)) {
+      const name = rowInputs.get(block.id)?.name ?? tool
+      if (name === SPAWN_TOOL) isAgentRead = true
+      else if (name !== undefined && ROW_TOOLS.has(name) && !rowsSeen.has(block.id)) calls.push({ ...block, name })
+    }
+  }
+  return calls.length > 0 || isAgentRead || isFirst ? { calls, isAgentRead } : undefined
+}
+
+/**
+ * The calls of `work` with the text and error mark of the row as Claude Code kept it: a mod beneath High Command may
+ * rewrite a tool_result's `content` and `is_error`, and Claude reads the row as kept. Each tool_use_id is put back, so
+ * a call keeps its name, its input, and its conversation. A call whose block the kept row does not hold keeps its own.
+ */
+function keptCalls(work: RowWork, kept: SessionAppendResult): RowWork {
+  if (work.calls.length === 0 || kept.message === undefined) return work
+  const blocks = new Map(toolResultsOf(kept.message.content).map(block => [block.id, block]))
+  return {
+    ...work,
+    calls: work.calls.map(call => {
+      const block = blocks.get(call.id)
+      return block === undefined ? call : { ...call, text: block.text, isError: block.isError }
+    }),
+  }
+}
+
+/** The conversation whose inbox a row's calls go to: the current one, or for an agent the one of its first row. */
+function rowSession(agentId: string | undefined): string {
+  const session = current ?? ''
+  if (agentId === undefined) return session
+  const known = agentSessions.get(agentId)
+  if (known !== undefined) return known
+  agentSessions.set(agentId, session)
+  trimOldest(agentSessions, LIMITS.rowAgents)
+  return session
+}
+
+/** Reads the local agent list for agent rows and Agent results, once per LIMITS.agentReadMs at most. */
+async function readAgentsForRows($: EngineInterface, agentId: string | undefined): Promise<void> {
+  try {
+    const now = await $.clock.now()
+    if (now - agentReadAt < LIMITS.agentReadMs) return
+    agentReadAt = now
+  } catch {
+    // refreshAgents reads the clock too, and says why it could not.
+  }
+  await refreshAgents($, 'session.append')
+  if (agentId === undefined || Object.hasOwn(agents, agentId)) return
+  unlistedReads.add(agentId)
+  trimOldest(unlistedReads, LIMITS.rowAgents)
+}
+
+/** Works on one row after it was kept: the agent list, then each call, at once or after a read of its record. */
+async function afterRow($: EngineInterface, agentId: string | undefined, work: RowWork, withLanes: boolean): Promise<void> {
+  if (!(await ensureCurrent($, 'session.append', withLanes))) return
+  const session = rowSession(agentId)
+  if (work.isAgentRead) {
+    await readAgentsForRows($, agentId)
+    if (work.calls.length === 0) await mirror($, 'session.append')
+  }
+  if (work.calls.length === 0) return
+  // The time of the result row: a send's entry shows it, and a listing's states keep it when they record later.
+  const hasSend = work.calls.some(call => call.name === 'SendMessage')
+  let at: number | undefined
+  try {
+    at = await $.clock.now()
+    if (hasSend) ensureCapture(inboxOf(session), at)
+  } catch (error) {
+    // A listing with no time reads the clock again when it records, and says there why it could not.
+    if (hasSend) diagnose($, `high-command: session.append (SendMessage): could not observe send time: ${causeOf(error)}`)
+  }
+  const ready: RowCall[] = []
+  const fresh: WaitingRow[] = []
+  for (const block of work.calls) {
+    const use = rowInputs.get(block.id)
+    rowInputs.delete(block.id)
+    const call: RowCall = {
+      toolUseId: block.id, toolName: block.name, text: block.text, isError: block.isError, sessionId: session,
+      ...(use === undefined ? {} : { input: use.input }), ...(agentId === undefined ? {} : { agentId }), ...(at === undefined ? {} : { at }),
+    }
+    if (!needsResult(call)) {
+      ready.push(call)
+      continue
+    }
+    const row: WaitingRow = { call, ...(use === undefined ? {} : { after: use.uuid }), tries: 0 }
+    waiting.set(call.toolUseId, row)
+    fresh.push(row)
+    for (const [id, old] of waiting) {
+      if (waiting.size <= LIMITS.waitingRows) break
+      waiting.delete(id)
+      old.timer?.cancel()
+      ready.push(old.call)
+    }
+  }
+  if (ready.length > 0) await deliver($, ready, withLanes)
+  if (fresh.length === 0) return
+  // The first read runs in this hook, so an agent's call, whose record is there at once, records before the next row.
+  const reads = (async () => {
+    for (const row of fresh) {
+      await tryRow($, row, withLanes).catch((error: unknown) => diagnose($, `high-command: session.append (${row.call.toolName}): could not read results from the transcript: ${causeOf(error)}`))
+    }
+  })()
+  await within($, reads, LIMITS.lookupFirstMs)
+}
+
+/** Waits for `work` for `ms` at most; the work goes on after that. With no timer, it waits for the work alone. */
+async function within($: EngineInterface, work: Promise<void>, ms: number): Promise<void> {
+  let passed = () => {}
+  const deadline = new Promise<void>(resolve => { passed = resolve })
+  let timer: Timer | undefined
+  try {
+    timer = $.clock.after(ms, () => passed())
+  } catch {
+    // No timer: wait for the work alone.
+  }
+  try {
+    await Promise.race([work, deadline])
+  } finally {
+    timer?.cancel()
+  }
+}
+
+/** One read of the transcript (`$.session.messages()`); undefined when it was refused or denied. */
+async function readTranscript($: EngineInterface, args: { agentId?: string; after?: string; last?: number }): Promise<unknown[] | undefined> {
+  try {
+    const answer: unknown = await $.session.messages(args)
+    return Array.isArray(answer) ? answer : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * What an agent's or the main conversation's rows hold for the calls `ids`: the rows after the calls' response row,
+ * which hold each call's result row; the newest rows (LIMITS.lookupLast) when that read is refused; the whole
+ * conversation when both are refused on a build that never answered a ranged read. A call in `due` (isLastDue) also
+ * reads the newest rows when this load did not see its response row, and besides the read on from that row when that
+ * read holds the call's result row with no stored record: the newest rows hold the response row, which can carry it.
+ * A call whose response row this load did not see reads nothing while it is not in `due`.
+ */
+async function summariesFor($: EngineInterface, agentId: string | undefined, after: string | undefined, ids: ReadonlySet<string>, due: ReadonlySet<string>): Promise<Map<string, Summary>> {
+  const scope = agentId === undefined ? {} : { agentId }
+  const newest = { ...scope, last: LIMITS.lookupLast }
+  if (after === undefined && due.size === 0) return new Map()
+  if (isRanged !== false) {
+    const onFrom = after === undefined ? undefined : await readTranscript($, { ...scope, after })
+    if (onFrom !== undefined) {
+      isRanged = true
+      const found = summariesOf(onFrom, ids)
+      const isBare = [...due].some(id => found.get(id)?.isAnswered !== true && isResultListed(onFrom, id))
+      return isBare ? summariesOf([...onFrom, ...((await readTranscript($, newest)) ?? [])], ids) : found
+    }
+    const answer = await readTranscript($, newest)
+    if (answer !== undefined) {
+      isRanged = true
+      return summariesOf(answer, ids)
+    }
+    if (isRanged === true) return new Map()
+  }
+  const answer = await readTranscript($, scope)
+  if (answer === undefined) return new Map()
+  isRanged = false
+  return summariesOf(answer, ids)
+}
+
+/**
+ * Whether a waiting row may ask for the newest rows on its own (summariesFor): at its own try of
+ * LIMITS.lookupLastFromMs and later ones (`isTry`, the try numbered `row.tries` in LIMITS.lookupMs), and at a read
+ * between tries once that try ran. A row whose response row this load did not see also may at its last read, which a
+ * slash command or a /config change takes (`isFinal`): with no read, it could not record.
+ */
+function isLastDue(row: WaitingRow, isFinal: boolean, isTry: boolean): boolean {
+  const at = LIMITS.lookupMs[isTry ? row.tries : row.tries - 1]
+  return (isFinal && row.after === undefined) || (at !== undefined && at >= LIMITS.lookupLastFromMs)
+}
+
+/**
+ * Reads what waiting rows wait for, one read per conversation and response row, and one more where isLastDue lets
+ * one: a row records once it has its record, or its input when that was all it lacked. `isFinal` records the rest with
+ * their text. `isTry`: the read is the scheduled try of the one row in `rows` (tryRow).
+ */
+async function lookUp($: EngineInterface, rows: readonly WaitingRow[], isFinal: boolean, withLanes: boolean, isTry = false): Promise<void> {
+  const groups = new Map<string, { agentId?: string; after?: string; rows: WaitingRow[] }>()
+  for (const row of rows) {
+    const key = `${row.call.agentId ?? ''}\n${row.after ?? ''}`
+    const group = groups.get(key) ?? { ...(row.call.agentId === undefined ? {} : { agentId: row.call.agentId }), ...(row.after === undefined ? {} : { after: row.after }), rows: [] }
+    group.rows.push(row)
+    groups.set(key, group)
+  }
+  const ready: RowCall[] = []
+  for (const group of groups.values()) {
+    const ids = new Set(group.rows.map(row => row.call.toolUseId))
+    const due = new Set(group.rows.filter(row => isLastDue(row, isFinal, isTry)).map(row => row.call.toolUseId))
+    const found = await summariesFor($, group.agentId, group.after, ids, due)
+    for (const row of group.rows) {
+      if (waiting.get(row.call.toolUseId) !== row) continue
+      const summary = found.get(row.call.toolUseId)
+      if (summary?.isAnswered === true) row.call.result = summary.result
+      if (row.call.input === undefined && summary?.input !== undefined) row.call.input = summary.input
+      if (!isFinal && needsResult(row.call)) continue
+      waiting.delete(row.call.toolUseId)
+      row.timer?.cancel()
+      ready.push(row.call)
+    }
+  }
+  if (ready.length > 0) await deliver($, ready, withLanes)
+}
+
+/** One scheduled read of a waiting row, then the next one, or its text after the last (LIMITS.lookupMs). */
+async function tryRow($: EngineInterface, row: WaitingRow, withLanes: boolean): Promise<void> {
+  const id = row.call.toolUseId
+  if (waiting.get(id) !== row) return
+  await lookUp($, [row], false, withLanes, true)
+  if (waiting.get(id) !== row) return
+  row.tries += 1
+  const wait = LIMITS.lookupMs[row.tries]
+  const done = LIMITS.lookupMs[row.tries - 1] ?? 0
+  if (wait !== undefined) {
+    try {
+      row.timer = $.clock.after(wait - done, () => {
+        void tryRow($, row, withLanes).catch((error: unknown) => diagnose($, `high-command: session.append (${row.call.toolName}): could not read results from the transcript: ${causeOf(error)}`))
+      })
+      return
+    } catch {
+      // No timer: the call keeps the text that the model read.
+    }
+  }
+  waiting.delete(id)
+  await deliver($, [row.call], withLanes)
+}
+
+/**
+ * Before a delivery, a turn end, or the pane records or reads anything, reads the records of the rows that wait, so a
+ * send or a listing goes in first; LIMITS.lookupFirstMs at most. `isFinal`: before a slash command or a /config
+ * change, which can reload the mod, record every waiting row, with its text when no record came; LIMITS.lookupFlushMs
+ * at most. With no row waiting, it calls nothing.
+ */
+async function rowsFirst($: EngineInterface, event: string, withLanes: boolean, isFinal = false): Promise<void> {
+  if (waiting.size === 0) return
+  const reads = lookUp($, [...waiting.values()], isFinal, withLanes)
+    .catch((error: unknown) => diagnose($, `high-command: ${event}: could not read results from the transcript: ${causeOf(error)}`))
+  await within($, reads, isFinal ? LIMITS.lookupFlushMs : LIMITS.lookupFirstMs)
+}
+
+/** Records finished calls, each tool use id once, then the status line and the copy of the inbox. */
+async function deliver($: EngineInterface, calls: readonly RowCall[], withLanes: boolean): Promise<void> {
+  const fresh = calls.filter(call => !rowsSeen.has(call.toolUseId))
+  if (fresh.length === 0) return
+  for (const call of fresh) rowsSeen.add(call.toolUseId)
+  trimOldest(rowsSeen, LIMITS.rowsSeen)
+  const sends = fresh.filter(call => call.toolName === 'SendMessage')
+  if (sends.length > 0) await recordSends($, sends)
+  for (const call of fresh) {
+    if (call.toolName !== 'ListAgents') continue
+    try {
+      const listing = listingOf(call)
+      if (listing !== undefined) await recordListing($, call.sessionId, listing, call.agentId, call.at)
+    } catch (error) {
+      diagnose($, `high-command: session.append (ListAgents): could not record peer states: ${causeOf(error)}`)
+    }
+  }
+  // A send to the main inbox counts there; an agent's send or listing makes its lane longer, so fitLanes can evict.
+  if (sends.some(call => call.agentId === undefined) || (withLanes && fresh.some(call => call.agentId !== undefined))) {
+    syncStatus($, 'session.append', false, withLanes)
+  }
+  await mirror($, 'session.append')
+}
+
+/**
+ * Records plain-text sends: the recipient and text that Claude wrote, with the result that Claude Code reported. A
+ * send by a local agent counts only when the agent list holds that agent and no mod started it, so a send by an agent
+ * that is not listed, or by any agent while the list cannot be read, is not recorded. A send whose input no read gave
+ * is not recorded either, with a debug line.
+ */
+async function recordSends($: EngineInterface, calls: readonly RowCall[]): Promise<void> {
+  let listed: readonly AgentInfo[] | undefined
+  try {
+    listed = await $.agent.list()
+  } catch (error) {
+    $.ui.log(`session.append (SendMessage): could not read local agents: ${causeOf(error)}; sends by local agents are not recorded`, { to: 'debug' })
+  }
+  for (const call of calls) {
+    if (call.input === undefined) {
+      $.ui.log('session.append (SendMessage): a send whose call High Command could not read is not recorded', { to: 'debug' })
+      continue
+    }
+    const to = call.input.to
+    const message = call.input.message
+    if (typeof to !== 'string' || typeof message !== 'string' || call.at === undefined) continue
+    try {
+      if (call.agentId !== undefined) {
+        const sender = listed?.find(candidate => candidate.id === call.agentId)
+        if (listed !== undefined && sender === undefined) {
+          $.ui.log('session.append (SendMessage): a send by a local agent that the agent list does not hold is not recorded', { to: 'debug' })
+        }
+        if (sender === undefined || sender.spawnedBy !== undefined) continue
+      }
+      const inbox = inboxes.get(call.sessionId)
+      if (inbox === undefined) continue
+      const lane = call.agentId === undefined ? undefined : laneOf(inbox, call.agentId)
+      const peer = recipientOf(to, lane?.peers ?? inbox.peers, listed ?? [], lane?.entries ?? inbox.entries)
+      if (peer === undefined) continue
+      append(inbox, [outboundEntry(peer, message, sendOutcomeOf(call))], call.at, call.agentId)
+    } catch (error) {
+      diagnose($, `high-command: session.append (SendMessage): could not record a message to ${sanitize(to)}: ${causeOf(error)}`)
+    }
+  }
+}
+
 /** Opens the main inbox roster; answers why the pane is not drawn, or undefined when it is. */
-async function openPane($: EngineInterface): Promise<string | undefined> {
+async function openPane($: EngineInterface, withLanes: boolean): Promise<string | undefined> {
+  await rowsFirst($, 'ui.open', withLanes)
   await refreshAgents($, 'ui.open')
   try { ensureCapture(inboxNow(), await $.clock.now()) } catch (error) { diagnose($, `high-command: ui.open: could not set capture window: ${causeOf(error)}`) }
   edit(inboxNow(), { selectedLane: '', rosterPage: 0, openThread: null })
@@ -737,10 +1107,10 @@ async function openPane($: EngineInterface): Promise<string | undefined> {
 }
 
 /** `/highcommand open`: the pane, or the reason there is none. */
-async function openFromCommand($: EngineInterface): Promise<CommandRunResult> {
+async function openFromCommand($: EngineInterface, withLanes: boolean): Promise<CommandRunResult> {
   try {
     if ((await $.session.surfaces()).length === 0) return { text: NO_PANES }
-    const problem = await openPane($)
+    const problem = await openPane($, withLanes)
     return problem === undefined ? {} : { text: `command.run: ${problem}` }
   } catch (error) {
     return { text: `command.run: the pane did not open: ${causeOf(error)}` }
@@ -895,7 +1265,7 @@ function bandActions($: EngineInterface, withLanes: boolean, drawn: Drawn): Band
   return {
     open: () =>
       press($, 'the pane did not open', withLanes, async () => {
-        const problem = await openPane($)
+        const problem = await openPane($, withLanes)
         if (problem !== undefined) $.ui.toast(`ui.press: ${problem}`)
       }),
     readAll: () =>
@@ -1009,6 +1379,8 @@ export const register: Register = (on, options) => {
     try { at = await $.clock.now(); ensureCapture(inboxOf(session), at) } catch (error) { diagnose($, `high-command: session.receive: could not observe delivery time: ${causeOf(error)}`) }
     const queued = await next(e)
     if (queued.consumed !== undefined) return queued
+    // A send or a listing that waits for its record goes in first, so a reply never comes before the send it answers.
+    await rowsFirst($, 'session.receive', withLanes)
     const inbox = inboxes.get(session)
     try {
       if (at !== undefined && inbox !== undefined) recordDelivery($, inbox, 'session.receive', queued.text, e.origin, at, e.agentId)
@@ -1037,6 +1409,7 @@ export const register: Register = (on, options) => {
     const listed = named === undefined ? undefined : agentsForLabel($)
     const entered = await next(e)
     if (entered.drop !== undefined) return entered
+    await rowsFirst($, 'prompt.submit', withLanes)
     try {
       if (at !== undefined) {
         let sender: string | undefined
@@ -1059,57 +1432,31 @@ export const register: Register = (on, options) => {
     return entered
   })
 
-  on('session.send', async ($, e, next) => {
-    if (e.origin.kind !== 'model') return next(e)
-    if (!(await ensureCurrent($, 'session.send', withLanes))) return next(e)
-    const session = current ?? ''
-    let at: number | undefined
-    try { at = await $.clock.now(); ensureCapture(inboxOf(session), at) } catch (error) { diagnose($, `high-command: session.send: could not observe send time: ${causeOf(error)}`) }
-    const sent = await next(e)
+  // Claude's SendMessage and ListAgents calls, from the conversation's rows (rowOf, afterRow). The hook never changes
+  // a row: it reads it, lets it be kept, then records the text of the row as kept (keptCalls). The result row of an
+  // Agent call, and a row of an agent that the agent list shows neither running nor idle, or did not hold at the
+  // agent's first row, make it read the list. An agent's first row binds it to the current conversation.
+  on('session.append', async ($, e, next) => {
+    let work: RowWork | undefined
     try {
-      if (at !== undefined) {
-        await recordSend($, session, e.to, e.text, sent, next.trace, at, e.agentId)
-      }
+      work = rowOf(e)
     } catch (error) {
-      diagnose($, `high-command: session.send: could not record a message to ${sanitize(e.to)}: ${causeOf(error)}`)
+      diagnose($, `high-command: session.append: could not read a tool call: ${causeOf(error)}`)
     }
-    if (e.agentId === undefined || withLanes) syncStatus($, 'session.send', false, withLanes)
-    await mirror($, 'session.send')
-    return sent
-  })
-
-  on('tool.call', { tool: 'ListAgents' }, async ($, e, next) => {
-    if (!(await ensureCurrent($, 'tool.call ListAgents', withLanes))) return next(e)
-    const session = current ?? ''
-    const out = await next(e)
-    const result: unknown = out.isError === true ? undefined : out.result
-    const structured = parseStructuredListing(result)
-    const listing = typeof result === 'object' && result !== null && 'listing' in result ? result.listing : undefined
-    if (structured === undefined && typeof listing !== 'string') return out
+    if (work === undefined) return next(e)
+    const kept = await next(e)
     try {
-      if (structured !== undefined) {
-        await recordListing($, session, structured, e.agentId)
-      } else if (typeof listing === 'string') await recordListing($, session, parseListing(listing), e.agentId)
+      await afterRow($, e.agentId, keptCalls(work, kept), withLanes)
     } catch (error) {
-      diagnose($, `high-command: tool.call ListAgents: could not record peer states: ${causeOf(error)}`)
+      diagnose($, `high-command: session.append: could not read a tool call: ${causeOf(error)}`)
     }
-    // Peer states make a lane longer, so fitLanes can evict lane messages.
-    if (e.agentId !== undefined && withLanes) syncStatus($, 'tool.call ListAgents', false, true)
-    await mirror($, 'tool.call ListAgents')
-    return out
-  })
-
-  on('agent.spawn', async ($, e, next) => {
-    const result = await next(e)
-    if (!(await ensureCurrent($, 'agent.spawn', withLanes))) return result
-    await refreshAgents($, 'agent.spawn')
-    await mirror($, 'agent.spawn')
-    return result
+    return kept
   })
 
   // A main turn records nothing, but the first one after a switch that no classic.SessionStart reported settles it.
   on('turn.complete', async ($, e, next) => {
     const result = await next(e)
+    await rowsFirst($, 'turn.complete', withLanes)
     if (e.agentId === undefined && pending === undefined) return result
     if (await ensureCurrent($, 'turn.complete', withLanes) && e.agentId !== undefined) {
       await refreshAgents($, 'turn.complete')
@@ -1134,6 +1481,7 @@ export const register: Register = (on, options) => {
   // that a settle writes, also one that a drawing left to its timer, then runs as typed: a command can reload the mod,
   // as /reload-plugins does (settleFirst). With no switch pending and no copy under way, the hook calls nothing.
   on('command.run', async ($, e, next) => {
+    await rowsFirst($, 'command.run', withLanes, true)
     await settleFirst($, 'command.run', withLanes)
     return next(e)
   })
@@ -1141,6 +1489,7 @@ export const register: Register = (on, options) => {
   // Every /config change does the same first: a change of an option reloads the mod (settleFirst). The change then
   // goes on as it came: the hook never refuses it and never changes its value.
   on('config.set', async ($, e, next) => {
+    await rowsFirst($, 'config.set', withLanes, true)
     await settleFirst($, 'config.set', withLanes)
     return next(e)
   })
@@ -1148,7 +1497,7 @@ export const register: Register = (on, options) => {
   on('command.run', { command: 'highcommand' }, async ($, e) => {
     const argument = e.args.trim()
     if (!(await ensureCurrent($, 'command.run', withLanes))) return { text: 'command.run: could not take back the inbox from $.state' }
-    if (argument === 'open') return openFromCommand($)
+    if (argument === 'open') return openFromCommand($, withLanes)
     if (argument !== '') return { text: USAGE }
     try {
       await refreshAgents($, 'command.run')
@@ -1205,8 +1554,9 @@ export const register: Register = (on, options) => {
     const waiting = rows.filter(row => row.unread > 0)
     const laneUnread = withLanes ? lanesUnread(all) : 0
     if (waiting.length === 0 && laneUnread === 0) return below
-    // Other mods draw `below`; when the band would push it past the engine's bounds, it drops the key hint, then
-    // keeps only the counts and Open, then yields.
+    // `below` is what hooks beneath draw in High Command's own row of the band; another mod's row never reaches it.
+    // When the band and `below` would pass the engine's bounds for that row, it drops the key hint, then keeps only
+    // the counts and Open, then yields. The engine applies its limits to all rows together and can leave the row out.
     const ui = $.ui.resolve(e)
     const actions = bandActions($, withLanes, drawnOf(inbox, list))
     const labels = peerLabels(rows.map(row => row.peer))

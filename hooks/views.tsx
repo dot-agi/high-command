@@ -75,8 +75,9 @@ const ORDER_NOTE = 'Order: observation time. Counts cover retained messages.'
 const LANE_NOTE = 'Split-pane traffic is not shown. Sent and received messages are observed separately.'
 const LIVENESS_NOTE = 'Roster snapshots do not confirm liveness.'
 const SEND_NOTE = 'Sends show observed text; a reported result is not a receipt.'
-const CORE_NOTE = 'Core evidence covers only the latest traced call, never reading or every send.'
 const NOT_DELIVERED = '(not delivered)'
+/** The result line of a send whose result the transcript did not hold, as for a call inside a Code Mode script. */
+const UNKNOWN_RESULT = 'reported send result: unknown'
 
 /** Body cells from which the roster draws fixed columns; below it, each roster row takes two lines. */
 const COLUMNS_FROM = 90
@@ -617,12 +618,13 @@ function entryView(ui: HighCommandElements, entry: HighCommandEntry, args: Entry
           </Text>
         </Box>
       )}
+      {delivery === undefined && entry.direction === 'out' && <Box paddingLeft={10}><Text dimColor>{UNKNOWN_RESULT}</Text></Box>}
       {entry.summary !== lineOf(firstLine(entry.body)) && <Box paddingLeft={4}><Text {...weight} wrap="wrap">{entry.summary}</Text></Box>}
       <Box paddingLeft={4}><Text wrap="wrap">{entry.body}</Text></Box>
       {entry.fullChars > entry.body.length && (
         <Box paddingLeft={4}><Text dimColor>{`(${count(entry.fullChars - entry.body.length, 'more character')} in the transcript.)`}</Text></Box>
       )}
-      {(entry.refusal !== undefined || entry.core !== undefined) && (
+      {entry.refusal !== undefined && (
         <Box paddingLeft={4}>
           <Button key={`reason:${entry.seq}`} label={isOpen ? 'Hide send details' : 'Show send details'} onPress={() => actions.reason(entry.seq)} />
         </Box>
@@ -633,15 +635,6 @@ function entryView(ui: HighCommandElements, entry: HighCommandEntry, args: Entry
           {entry.refusal.fullChars > entry.refusal.body.length && (
             <Text dimColor>{`Refusal truncated: ${entry.refusal.fullChars} characters originally; ${entry.refusal.body.length} retained.`}</Text>
           )}
-        </Box>
-      )}
-      {isOpen && entry.core !== undefined && (
-        <Box flexDirection="column" paddingLeft={4}>
-          <Text dimColor wrap="wrap">{CORE_NOTE}</Text>
-          <Text>{`Latest traced core recipient (bounded): ${entry.core.to}`}</Text>
-          <Text>{`Core queue outcome: ${entry.core.isDelivered ? 'accepted, not read' : `refused: ${entry.core.reason}`}`}</Text>
-          <Text wrap="wrap">{entry.core.body}</Text>
-          {entry.core.fullChars > entry.core.body.length && <Text>{`Core text truncated: ${entry.core.fullChars} characters originally.`}</Text>}
         </Box>
       )}
     </Box>
@@ -772,9 +765,9 @@ function keyHint(Text: HighCommandElements['Text'], cells: number, columns: numb
 }
 
 /**
- * The band row, one blank row below its top, above what other mods draw there. `waiting` holds only rows with unread
- * entries; `laneUnread` is the unread count of all agent lanes, above zero only with agentLanesInBand on. `columns`,
- * the band's width in cells, adds the key hint where the row has room for it.
+ * The band row, one blank row below its top, above what hooks beneath draw in High Command's own row of the band
+ * (`below`). `waiting` holds only rows with unread entries; `laneUnread` is the unread count of all agent lanes, above
+ * zero only with agentLanesInBand on. `columns`, the band's width in cells, adds the key hint where the row has room.
  */
 export function bandTree(
   { Box, Text, Button }: HighCommandElements,
@@ -803,7 +796,7 @@ export function bandTree(
   )
 }
 
-/** Keeps only the counts and Open, below the same blank row, when the full band exceeds the shared budget; `columns` as in bandTree. */
+/** Keeps only the counts and Open, below the same blank row, when the full band passes the bounds of its own row; `columns` as in bandTree. */
 export function compactBandTree({ Box, Text, Button }: HighCommandElements, waiting: readonly RosterRow[], actions: BandActions, below: RenderElement, laneUnread = 0, columns?: number): RenderElement {
   const summary = `High Command · ${unreadText(unreadTotal(waiting), laneUnread)}`
   const hint = keyHint(Text, rowCells(summary, ['Open'], 0), columns)

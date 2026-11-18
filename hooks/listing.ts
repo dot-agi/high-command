@@ -11,22 +11,51 @@ import { peerKey, sanitize } from './text'
 const HEAD = /^\s+(\S.*) \[[0-9a-z]+\](?=\s+·)/i
 /** A state word as the engine writes one: a letter, then letters, spaces, and hyphens. */
 const STATE_WORD = new RegExp(`^[a-z][a-z -]{0,${LIMITS.stateChars - 1}}$`, 'i')
+/** The header of the listing's teammate rows. Any other header line, such as `Peer sessions (n):`, ends that section. */
+const TEAMMATES = /^Teammates \(\d+\):$/
+/** The last field of a teammate row that says when it started, as in `started 6s ago`. */
+const STARTED = /^started\s/
+/**
+ * The state words of a teammate row. A teammate with no state prints its type alone, as in `general-purpose ·
+ * started 2s ago`, or its backend, as in `pane`, so only these words count as a state.
+ */
+export const TEAMMATE_STATES: ReadonlySet<string> = new Set(['running', 'idle', 'done', 'failed', 'stopped', 'offline'])
 
-/** Peer states from a ListAgents listing, and how many lines looked like rows. */
+/**
+ * The state of a teammate row from its fields after the ref: `state`, or `type · state`, each with an optional
+ * `started ...` field at the end (both forms measured on 2.1.326). The last field gives the state only when it is
+ * one of TEAMMATE_STATES. Any other number of fields, or an empty field, gives none.
+ */
+function teammateState(fields: readonly string[]): string | undefined {
+  const kept = fields.length > 0 && STARTED.test(fields.at(-1)!) ? fields.slice(0, -1) : fields
+  if (kept.length < 1 || kept.length > 2 || kept.some(field => field === '')) return undefined
+  const state = kept.at(-1)!
+  return TEAMMATE_STATES.has(state) ? state : undefined
+}
+
+/**
+ * Peer states from a ListAgents listing, and how many lines looked like rows. A row under `Teammates (n):` gives the
+ * state of teammateState; any other row gives its second field after the ref (`interactive · busy`), as in 1.3.1.
+ */
 export function parseListing(listing: string): { reports: PeerReport[]; rowCount: number } {
-  const rows = sanitize(listing)
-    .split('\n')
-    .filter(line => /^\s+\S/.test(line))
   const reports: PeerReport[] = []
-  for (const row of rows) {
-    const head = HEAD.exec(row)
+  let rowCount = 0
+  let isTeammates = false
+  for (const line of sanitize(listing).split('\n')) {
+    if (!/^\s+\S/.test(line)) {
+      if (line.trim() !== '') isTeammates = TEAMMATES.test(line.trim())
+      continue
+    }
+    rowCount += 1
+    const head = HEAD.exec(line)
     if (head === null) continue
     const peer = peerKey(head[1] ?? '')
     // The text before the first `·` is the space after the ref; the fields keep their places, so an empty one stays empty.
-    const state = row.slice(head[0].length).split('·')[2]?.trim()
+    const fields = line.slice(head[0].length).split('·').slice(1).map(field => field.trim())
+    const state = isTeammates ? teammateState(fields) : fields[1]
     if (peer !== '' && state !== undefined && STATE_WORD.test(state)) reports.push({ peer, state })
   }
-  return { reports, rowCount: rows.length }
+  return { reports, rowCount }
 }
 
 /** Structured rows take precedence; duplicate names cannot establish one peer's state. */

@@ -51,4 +51,33 @@ export const LIMITS = {
   bandPeers: 3,
   /** Roster rows that get a digit hotkey. */
   hotkeys: 9,
+  /**
+   * Milliseconds after a result row that waits (a ListAgents call, and a SendMessage call whose text or input is not
+   * enough) at which High Command reads its structured record from `$.session.messages()`. Claude Code stores the record
+   * a moment after the row. After the last read, the call keeps the text that the model read.
+   */
+  lookupMs: [0, 50, 100, 250, 1000, 3000],
+  /** Rows that one such read asks for when it cannot read on from the call's own response row. */
+  lookupLast: 8,
+  /**
+   * The try of lookupMs from which a read asks for the newest lookupLast rows on its own: for a call whose response row
+   * High Command did not see, and, besides the read on from that row, for a call whose result row is there with no
+   * stored record. Before it, High Command asks for the newest rows only when the read on from the row is refused, and
+   * for a call whose response row it did not see at a slash command or a /config change, which take its last read.
+   */
+  lookupLastFromMs: 250,
+  /** Milliseconds that a delivery, a turn end, opening the pane, or the row's own hook waits at most for those reads. */
+  lookupFirstMs: 2000,
+  /** Milliseconds that a slash command or a /config change waits at most for those reads before it goes on. */
+  lookupFlushMs: 1000,
+  /** Result rows that wait for those reads at once; past it, the oldest keeps its text. */
+  waitingRows: 256,
+  /** Tool calls whose input High Command keeps until their result row comes. */
+  rowInputs: 512,
+  /** Tool calls that High Command remembers as recorded, so that none records twice. */
+  rowsSeen: 2000,
+  /** Local agents whose conversation High Command keeps, from the agent's first row. */
+  rowAgents: 256,
+  /** Milliseconds between two reads of the local agent list that agent rows cause. */
+  agentReadMs: 1000,
 } as const

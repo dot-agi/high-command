@@ -31,7 +31,7 @@ Test the parsers, the state changes, and each main path a person takes: a messag
 ## Write a change
 
 - Keep `$` in `hooks/register.tsx`. Every other module is a pure function of its inputs.
-- Every failure gives a line of the form `high-command: <event>: <cause>`.
+- Every failure gives a line of the form `high-command: <event>: <cause>`, or `high-command: <event> (<tool>): <cause>` for a tool call.
 - Keep each export used, each branch reachable, and each piece of logic in one place.
 - Use invented names in examples and tests.
 
