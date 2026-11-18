@@ -48,6 +48,7 @@ claude plugin list --json | jq -r '.[] | select(.id == "high-command@high-comman
 | `hooks/register.tsx` | The hooks module: every hook, the inbox of each conversation in module memory (the source of truth), the copy of the current inbox it writes to `$.state` for drawing and reloads, diagnostics, and button handlers. The only file that uses `$`. |
 | `hooks/envelope.ts` | Parses a delivery into entries and peer reports. |
 | `hooks/listing.ts` | Reads peer states from a ListAgents listing. |
+| `hooks/rows.ts` | Reads tool calls from the conversation's rows and from what `$.session.messages()` stores for them: send outcomes and listings. |
 | `hooks/inbox.ts` | Pure state transforms: append, read marks, roster, threads, recipients. |
 | `hooks/summary.ts` | The `/highcommand` text. |
 | `hooks/views.tsx` | The pane and band trees, and the check that keeps the band within the engine's drawing bounds. |
@@ -70,8 +71,11 @@ claude plugin list --json | jq -r '.[] | select(.id == "high-command@high-comman
 - Peer names are sender text: read peer-keyed records with `Object.hasOwn`, and write them through `Map` and `Object.fromEntries`.
 - Parse peer text in linear time. A regular expression must not repeat a group that can match the same text in two ways.
 - Sender labels come from origin fields alone; message text can only lower one. The `suspicious` mark and any sender-claimed priority never reach `/highcommand`, the roster order, or a count.
-- The mod never changes, consumes, or refuses a delivery, a prompt, a send, or a tool result, and makes no file, network, process, store, or model call.
-- Each failure path gives `high-command: <event>: <cause>`.
+- The mod never changes, consumes, or refuses a delivery, a prompt, a send, a transcript row, or a tool result, and makes no file, network, process, store, or model call.
+- Each failure path gives `high-command: <event>: <cause>` or `high-command: <event> (<tool>): <cause>`.
+- Never hook `tool.call`, `tool.check`, `tool.judge`, `tool.run`, `classic.PreToolUse`, `classic.PostToolUse`, `classic.PostToolUseFailure`, `session.send`, or `agent.spawn`, also in code that never runs. Claude Code reads the module source and keeps Code Mode off. Do not spell these names anywhere under `hooks/` or `types/`, also not in a comment or as part of a longer name.
+- Read Claude's tool calls from `session.append` rows, and their structured results from `$.session.messages()`. A call with no result is a call inside a Code Mode script: never tell one by its ID or its row's model name, and never show a missing result as a result.
+- Record a send only from a SendMessage call with a plain-text message. Leave out an agent that `$.agent.list()` lists with a `spawnedBy`, and an agent that it does not list.
 - Return a button's work from its `onPress`. A press counts as the person's own input only while that work runs, and only then does `$.ui.open` place the pane below 144 columns.
 - Test the parsers, the state changes, and each main path a person takes. Run drawing tests on `terminal` and `desktop`. Keep the suite under one minute.
 - Never commit a test file.

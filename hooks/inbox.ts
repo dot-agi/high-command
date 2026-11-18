@@ -1,8 +1,9 @@
-import type { AgentInfo, SessionSendResult, TraceEntry } from 'claude-code'
+import type { AgentInfo } from 'claude-code'
 
 import type { HighCommandEntry, HighCommandLane, HighCommandPeer, HighCommandState, HighCommandThread, HighCommandTrust } from '../types'
 import type { NewEntry, PeerReport } from './envelope'
 import { LIMITS } from './limits'
+import type { SendOutcome } from './rows'
 import { capBody, lineOf, peerKey, sanitize, summaryOf } from './text'
 
 type Peers = Record<string, HighCommandPeer>
@@ -151,8 +152,11 @@ export function recipientOf(to: string, peers: Readonly<Peers>, agents: readonly
   return name === '' ? undefined : name
 }
 
-/** The observed send attempt, its reported outcome, and a bounded detailed refusal. */
-export function outboundEntry(peer: string, text: string, sent: SessionSendResult): NewEntry {
+/**
+ * The observed send attempt, its reported outcome, and a bounded detailed refusal. With no outcome, as for a call
+ * inside a Code Mode script that succeeded, the entry has no `delivery`: its result is unknown.
+ */
+export function outboundEntry(peer: string, text: string, sent: SendOutcome): NewEntry {
   const body = sanitize(text)
   return {
     peer,
@@ -160,8 +164,8 @@ export function outboundEntry(peer: string, text: string, sent: SessionSendResul
     kind: 'message',
     summary: summaryOf(undefined, body),
     ...capBody(body),
-    ...(!sent.isDelivered ? { refusal: capBody(sanitize(sent.reason)) } : {}),
-    delivery: sent.isDelivered ? { isDelivered: true } : { isDelivered: false, reason: lineOf(sanitize(sent.reason)) },
+    ...(sent?.isDelivered === false ? { refusal: capBody(sanitize(sent.reason)) } : {}),
+    ...(sent === undefined ? {} : { delivery: sent.isDelivered ? { isDelivered: true } : { isDelivered: false, reason: lineOf(sanitize(sent.reason)) } }),
   }
 }
 
@@ -349,17 +353,4 @@ export function markRead(marks: Readonly<ReadMarks>, entries: readonly HighComma
 export function labelOf(entry: HighCommandEntry): { arrow: '←' | '→'; word: string } {
   if (entry.direction === 'out') return { arrow: '→', word: entry.delivery?.isDelivered === false ? 'send attempted (not delivered)' : 'send attempted' }
   return { arrow: '←', word: entry.kind === 'result' ? 'finished' : entry.kind === 'failure' ? 'failed' : 'message' }
-}
-
-/** A settled core call proves only that call's queue outcome. */
-export function coreEvidence(trace: readonly TraceEntry<'session.send'>[]): HighCommandEntry['core'] {
-  const core = trace.find(item => item.plugin === 'engine' && item.tier === 'core' &&
-    (item.outcome === 'returned' || item.outcome === 'passed') && item.returned !== undefined)
-  if (core?.returned === undefined) return undefined
-  return {
-    to: sanitize(core.received.to).slice(0, LIMITS.bodyChars),
-    ...capBody(sanitize(core.received.text)),
-    isDelivered: core.returned.isDelivered,
-    ...(!core.returned.isDelivered ? { reason: lineOf(sanitize(core.returned.reason)) } : {}),
-  }
 }

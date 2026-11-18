@@ -41,9 +41,15 @@ export type HighCommandEntry = {
   evictedTotal?: number
   /** The detailed refusal, bounded separately from its one-line preview. */
   refusal?: { body: string; fullChars: number }
-  /** Evidence from the latest downstream call only, never a complete send history. */
+  /**
+   * Outbound entries kept from 1.3.x only: what Claude Code itself received for the send. High Command no longer
+   * records or shows it, and keeps the field so that such an entry still reads as saved.
+   */
   core?: { to: string; body: string; fullChars: number; isDelivered: boolean; reason?: string }
-  /** Outbound entries only: the reported outcome, separate from core evidence. */
+  /**
+   * Outbound entries only: the reported outcome. Absent when the transcript held no result for the send, as for a
+   * SendMessage call inside a Code Mode script that succeeded: its result is unknown.
+   */
   delivery?: { isDelivered: true } | { isDelivered: false; reason: string }
 }
 
